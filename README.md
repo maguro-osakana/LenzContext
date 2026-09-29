@@ -129,6 +129,9 @@ lenzcontext IMG_001.jpg
 # Batch, preserving the exact argument order; PNG is warned about and skipped:
 lenzcontext C.jpg A.JPEG screenshot.png B.jpg -o result.yaml
 
+# Add another batch to an existing output file (or create it if absent):
+lenzcontext more/*.jpg -a result.yaml
+
 # Custom database, prompts, structured output, and timeout:
 lenzcontext *.jpg --geonames-db data/custom.db \
   --prompt-config config/prompts.yaml --structured-output --timeout 90 -o result.yaml
@@ -142,6 +145,17 @@ lenzcontext IMG_001.jpg -V
 
 The version and verbosity flags differ only by case: `-v/--version` prints the
 version and exits, while `-V/--verbose` enables DEBUG logging for the run.
+`-o FILE` and `-a FILE` are mutually exclusive. Without either, the output is
+`lenzcontext.yaml`.
+
+Each successful image is written to the YAML file as soon as it finishes. To
+watch an existing output while the batch runs, use `tail -f lenzcontext.yaml`;
+`tail -F lenzcontext.yaml` also waits for the file to appear. When using `-o`
+or the default output, the first success replaces the existing file. With `-a`,
+the first success creates the file if needed or adds a record to an existing
+LenzContext YAML file. Append mode checks the file's format before any image is
+processed; manually edited or malformed files are rejected. Repeated file names
+are appended as separate records.
 
 Shell globs are expanded by the shell; explicit arguments control ordering.
 JPEG extensions are case-insensitive. Pillow verifies that the content actually
@@ -257,9 +271,11 @@ are preserved. Whitespace-only text becomes empty; `detected: true` with empty
 text remains a validation error. This normalization applies to the stored OCR
 value, not YAML formatting or the raw model response shown in verbose logs.
 
-PyYAML writes Unicode directly. File names are base
-names; paths are not included. Output is replaced atomically after processing.
-The output directory must already exist.
+PyYAML writes Unicode directly. File names are base names; paths are not
+included. Each complete record is rendered in memory and written to the same
+output file, then closed so it appears in `tail`. If the process is forcibly
+stopped during a write, the last record may be incomplete. The output directory
+must already exist.
 
 ## Errors and logging
 
@@ -287,10 +303,13 @@ coordinates and OCR text from the image; redact them before sharing.
 
 - Exit `0`: at least one successful record was written, even if others failed.
 - Exit `1`: no successful JPEGs, or writing output failed.
-- Exit `2`: invalid arguments/configuration or output colliding with an input/DB.
+- Exit `2`: invalid arguments/configuration, invalid append target, or output
+  colliding with an input/DB.
 
-When nothing succeeds, an existing output file is left unchanged. Successful
-records preserve input order; failed inputs are omitted.
+When nothing succeeds, an existing output file is left unchanged and a new one
+is not created. Successful records preserve input order; failed inputs are
+omitted. A write error stops the batch; records already written remain in the
+output file.
 
 ## Privacy
 

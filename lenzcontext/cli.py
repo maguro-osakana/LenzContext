@@ -3,6 +3,7 @@
 import argparse
 import logging
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 from . import __version__
@@ -12,14 +13,15 @@ from .geonames.database import GeoNamesDatabase
 from .geonames.reverse import ReverseGeocoder
 from .llm.base import LLMError
 from .llm.openai_compatible import OpenAICompatibleAnalyzer
-from .models import BatchResult
-from .output import write_yaml
+from .models import BatchResult, ImageResult
+from .output import IncrementalYamlWriter, InvalidOutput
 from .pipeline import Pipeline
 
 LOG = logging.getLogger(__name__)
 
 
-def process_batch(paths: list[Path], pipeline: Pipeline) -> BatchResult:
+def process_batch(paths: list[Path], pipeline: Pipeline,
+                  on_success: Callable[[ImageResult], None] | None = None) -> BatchResult:
     images = []
     skipped = failed = 0
     for path in paths:
@@ -29,7 +31,7 @@ def process_batch(paths: list[Path], pipeline: Pipeline) -> BatchResult:
             continue
         LOG.info("processing %s", path)
         try:
-            images.append(pipeline.process(path))
+            image = pipeline.process(path)
         except (OSError, InvalidJPEG):
             LOG.warning("skipping unreadable JPEG: %s", path)
             skipped += 1
@@ -40,6 +42,10 @@ def process_batch(paths: list[Path], pipeline: Pipeline) -> BatchResult:
             # Third-party exception messages may contain requests or credentials.
             LOG.error("processing failed for %s (%s)", path, type(exc).__name__)
             failed += 1
+        else:
+            if on_success is not None:
+                on_success(image)
+            images.append(image)
     LOG.debug("batch summary: %d succeeded, %d skipped, %d failed", len(images), skipped, failed)
     return BatchResult(images=images)
 
@@ -49,12 +55,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("-V", "--verbose", action="store_true", help="enable DEBUG diagnostics on stderr")
     parser.add_argument("images", nargs="+", type=Path)
-    parser.add_argument("-o", "--output", type=Path, default=Path("lenzcontext.yaml"))
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument("-o", "--output", type=Path, help="output YAML file (default: lenzcontext.yaml)")
+    output_group.add_argument("-a", "--append", type=Path, metavar="FILE", help="append records to an existing YAML file")
     parser.add_argument("--geonames-db", type=Path, default=Path("data/geonames.db"))
     parser.add_argument("--prompt-config", type=Path, default=None, help="default: config/prompts.yaml")
     parser.add_argument("--structured-output", action="store_true", help="request JSON Schema, falling back on rejection")
     parser.add_argument("--timeout", type=float, default=120, help="API timeout in seconds (default: 120)")
     args = parser.parse_args(argv)
+    destination = args.append or args.output or Path("lenzcontext.yaml")
     fmt = "%(levelname)s: %(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
     logging.basicConfig(level=logging.INFO, format=fmt)
     # Pillow dumps raw EXIF tags at DEBUG; keep that out of CLI output.
@@ -65,11 +74,11 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("lenzcontext").setLevel(logging.INFO)
     LOG.debug("inputs=%d geonames_db=%s prompt_config=%s output=%s structured_output=%s timeout=%s",
               len(args.images), args.geonames_db, args.prompt_config or "<auto>",
-              args.output, args.structured_output, args.timeout)
-    if any(args.output.resolve() == image.resolve() for image in args.images):
+              destination, args.structured_output, args.timeout)
+    if any(destination.resolve() == image.resolve() for image in args.images):
         LOG.error("output must not overwrite an input image")
         return 2
-    if args.output.resolve() == args.geonames_db.resolve():
+    if destination.resolve() == args.geonames_db.resolve():
         LOG.error("output must not overwrite the GeoNames database")
         return 2
     try:
@@ -77,6 +86,14 @@ def main(argv: list[str] | None = None) -> int:
         prompts = load_prompts(args.prompt_config)
     except ConfigError as exc:
         LOG.error("configuration error: %s", exc)
+        return 2
+    try:
+        writer = IncrementalYamlWriter(destination, append=args.append is not None)
+    except InvalidOutput as exc:
+        LOG.error("invalid append target: %s", exc)
+        return 2
+    except OSError:
+        LOG.error("could not inspect output: %s", destination)
         return 2
     database = None
     geocoder = None
@@ -87,16 +104,15 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, sqlite3.Error):
             LOG.warning("GeoNames database unavailable; continuing without addresses (run the importer)")
         pipeline = Pipeline(OpenAICompatibleAnalyzer(settings, prompts), geocoder)
-        batch = process_batch(args.images, pipeline)
+        try:
+            batch = process_batch(args.images, pipeline, on_success=writer.write)
+        except OSError:
+            LOG.error("could not write output: %s", destination)
+            return 1
         if not batch.images:
             LOG.error("no JPEG images were successfully processed; output was not written")
             return 1
-        try:
-            write_yaml(batch, args.output)
-        except OSError:
-            LOG.error("could not write output: %s", args.output)
-            return 1
-        LOG.info("wrote %d image records to %s", len(batch.images), args.output)
+        LOG.info("wrote %d image records to %s", len(batch.images), destination)
         return 0
     finally:
         if database is not None:

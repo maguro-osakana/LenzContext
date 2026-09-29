@@ -3,6 +3,7 @@ import sqlite3
 from unittest.mock import Mock
 
 import pytest
+import yaml
 from PIL import Image
 
 from lenzcontext import __version__
@@ -105,3 +106,86 @@ def test_invalid_reasoning_fails_before_analysis(monkeypatch, make_jpeg, tmp_pat
     analyze.assert_not_called()
     assert not output.exists()
     assert "vision.reasoning.token_budget" in caplog.text
+
+
+def test_cli_writes_each_success_before_next_image(monkeypatch, make_jpeg, tmp_path, analysis):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    paths = [make_jpeg("one.jpg"), make_jpeg("two.jpg")]
+    output = tmp_path / "result.yaml"
+    calls = []
+
+    def analyze(*args):
+        calls.append(1)
+        if len(calls) == 2:
+            assert [row["file"]["name"] for row in yaml.safe_load(output.read_text())["images"]] == ["one.jpg"]
+        return analysis
+
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", analyze)
+    assert main([*(str(p) for p in paths), "-o", str(output),
+                 "--geonames-db", str(tmp_path / "missing.db")]) == 0
+    assert [row["file"]["name"] for row in yaml.safe_load(output.read_text())["images"]] == ["one.jpg", "two.jpg"]
+
+
+def test_cli_append_and_empty_batch(monkeypatch, make_jpeg, tmp_path, analysis):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", lambda *args: analysis)
+    image = make_jpeg("one.jpg")
+    output = tmp_path / "result.yaml"
+    assert main([str(image), "-a", str(output)]) == 0
+    first = output.read_text()
+    assert main([str(tmp_path / "not-jpeg.png"), "-a", str(output)]) == 1
+    assert output.read_text() == first
+    assert main([str(image), "-a", str(output)]) == 0
+    assert output.read_text().startswith(first)
+    assert len(yaml.safe_load(output.read_text())["images"]) == 2
+
+
+def test_cli_append_rejects_invalid_file_before_analysis(monkeypatch, make_jpeg, tmp_path):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    analyze = Mock()
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", analyze)
+    output = tmp_path / "result.yaml"
+    output.write_text("not yaml: [")
+    assert main([str(make_jpeg()), "-a", str(output)]) == 2
+    assert output.read_text() == "not yaml: ["
+    analyze.assert_not_called()
+
+
+def test_cli_output_options_are_exclusive(make_jpeg, tmp_path):
+    with pytest.raises(SystemExit) as raised:
+        main([str(make_jpeg()), "-o", str(tmp_path / "out.yaml"), "-a", str(tmp_path / "append.yaml")])
+    assert raised.value.code == 2
+
+
+def test_cli_write_error_stops_batch_and_keeps_completed_records(monkeypatch, make_jpeg, tmp_path, analysis):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    analyze = Mock(return_value=analysis)
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", analyze)
+    from lenzcontext.output import IncrementalYamlWriter
+
+    original_write = IncrementalYamlWriter.write
+    writes = 0
+
+    def write_once(self, image):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("disk full")
+        original_write(self, image)
+
+    monkeypatch.setattr(IncrementalYamlWriter, "write", write_once)
+    paths = [make_jpeg(f"{i}.jpg") for i in range(3)]
+    output = tmp_path / "result.yaml"
+    assert main([*(str(p) for p in paths), "-o", str(output)]) == 1
+    assert [item["file"]["name"] for item in yaml.safe_load(output.read_text())["images"]] == ["0.jpg"]
+    assert analyze.call_count == 2
+
+
+@pytest.mark.parametrize("flag", ["-a", "-o"])
+def test_cli_output_cannot_replace_input_or_db(make_jpeg, tmp_path, flag):
+    image = make_jpeg()
+    assert main([str(image), flag, str(image)]) == 2
+    db = tmp_path / "geonames.db"
+    db.write_bytes(b"database")
+    assert main([str(image), flag, str(db), "--geonames-db", str(db)]) == 2
+    assert db.read_bytes() == b"database"
