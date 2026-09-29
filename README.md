@@ -23,38 +23,11 @@ model choice and no real API call is needed to install or run tests.
 
 ## GeoNames dataset setup
 
-Download these files from the [GeoNames dump directory](https://download.geonames.org/export/dump/)
-into `data/geonames-src/`:
-
-- `allCountries.zip`
-- `alternateNamesV2.zip`
-- `admin1CodesASCII.txt`
-- `admin2Codes.txt`
-- `countryInfo.txt`
-
-Run `bash geonames_setup.sh` to download the files, extract the ZIPs, and build
-the default database at `data/geonames.db` (requires `curl` and `unzip`). The
-script expects the project environment to be active. It stops if a download,
-extraction, or import fails. It will not replace an existing database; remove it
-manually only if you intend to rebuild it. To keep the current database and build
-to another path, pass the output file as an argument:
-
-```bash
-bash geonames_setup.sh /tmp/geonames-test.db
-```
-
-If the dump files are already present, run the importer directly:
-
-```bash
-python -m lenzcontext.geonames.importer data/geonames-src -o data/custom.db
-```
-
-The default database is `data/geonames.db`. A full import needs several GB of disk
-space and can take several minutes; the downloaded files remain separate. Import
-streams records in bounded batches, builds indexes, then atomically publishes the
-database. A failed import does not replace an existing database. Re-import after
-updating the source dumps. Generated databases and source dumps are excluded from
-Git; they are not bundled with the Python package.
+Run `bash geonames_setup.sh` to download the GeoNames data, extract it, and create
+the database at `data/geonames.db`. The script requires `curl`, `unzip`, and the
+project's Python environment to be installed. Downloaded files are kept in
+`data/geonames-src/`. Generated files are excluded from Git and are not bundled
+with the Python package.
 
 At runtime the database is read-only. RTree bounding boxes narrow candidates,
 then Haversine distance ranks populated places. Distance takes precedence over
