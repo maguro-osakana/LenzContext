@@ -119,13 +119,15 @@ def _redacted_payload(payload: dict[str, Any], image_size: int, digest: str) -> 
 
 
 class OpenAICompatibleAnalyzer:
-    def __init__(self, settings: Settings, prompts: Prompts, transport: Transport = send_json):
+    def __init__(self, settings: Settings, prompts: Prompts, transport: Transport = send_json,
+                 *, description_language: str = "English"):
         self.settings = settings
         self.prompts = prompts
         self.transport = transport
+        self.description_language = description_language
 
     def analyze(self, jpeg: bytes, address: Address | None, taken_at: str | None) -> AnalysisResult:
-        system, user = self.prompts.render(address, taken_at)
+        system, user = self.prompts.render(address, taken_at, self.description_language)
         payload: dict[str, Any] = {
             "model": self.settings.model,
             "messages": [

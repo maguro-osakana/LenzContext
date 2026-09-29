@@ -45,13 +45,15 @@ class Prompts:
     user: str
     reasoning: Reasoning | None = None
 
-    def render(self, address: Address | None, taken_at: str | None) -> tuple[str, str]:
+    def render(self, address: Address | None, taken_at: str | None,
+               description_language: str = "English") -> tuple[str, str]:
         context = {
             "address": (
                 f"Address:\nEnglish: {address.english}\nLocal: {address.local}"
                 if address else ""
             ),
             "taken_at": f"Capture time: {taken_at}" if taken_at else "",
+            "description_language": description_language,
         }
         return tuple(Template(value).substitute(context) for value in (self.system, self.user))
 
@@ -82,7 +84,7 @@ def load_prompts(path: Path | None = None) -> Prompts:
     except ConfigError:
         raise
     except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as exc:
-        raise ConfigError("invalid prompt configuration: check YAML and ${address}/${taken_at} placeholders") from exc
+        raise ConfigError("invalid prompt configuration: check YAML and template placeholders") from exc
 
 
 @dataclass(frozen=True)

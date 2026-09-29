@@ -10,6 +10,7 @@ from lenzcontext.models import AnalysisResult, OCRResult
 @pytest.fixture
 def analysis():
     return AnalysisResult(description_en="A street with shops and pedestrians.",
+                          description="A street with shops and pedestrians.",
                           ocr=OCRResult(detected=True, text="서울역\nWelcome\n出口"),
                           screenshot_probability=0.02)
 

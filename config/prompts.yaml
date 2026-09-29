@@ -20,20 +20,26 @@ vision:
     ${address}
     ${taken_at}
 
+    Description language: ${description_language}
+
     Tasks:
-    1. Write a concise English description of the visible image content.
-       Target approximately 120-180 English characters.
-    2. Extract readable text from the image. Preserve the original language,
+    1. Write a concise English description of the visible image content in
+       description_en. Target approximately 120-180 English characters.
+    2. Write a concise description of the same visible content in
+       ${description_language} in description. If the requested language is
+       English, make description identical to description_en.
+    3. Extract readable text from the image. Preserve the original language,
        script and spelling. Separate lines and words with a single space.
        Do not translate, correct, or invent
        unreadable characters. If no text is readable, use detected=false and text="".
-    3. Estimate the probability that this image is a screenshot, from 0.0 to 1.0.
+    4. Estimate the probability that this image is a screenshot, from 0.0 to 1.0.
        Use visual clues such as status bars, browser chrome, buttons, menus,
        application UI, and screen layout. Missing EXIF alone is not evidence.
 
     Return JSON with exactly these fields and types:
     {
       "description_en": "English description",
+      "description": "Description in the requested language",
       "ocr": {"detected": true, "text": "Original text"},
       "screenshot_probability": 0.0
     }

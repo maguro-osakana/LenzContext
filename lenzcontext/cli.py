@@ -63,11 +63,16 @@ def main(argv: list[str] | None = None) -> int:
     output_group.add_argument("-a", "--append", type=Path, metavar="FILE", help="append records to an existing YAML file")
     parser.add_argument("--geonames-db", type=Path, default=Path("data/geonames.db"))
     parser.add_argument("--prompt-config", type=Path, default=None, help="default: config/prompts.yaml")
+    parser.add_argument("--description-language", default="English", metavar="LANGUAGE",
+                        help="language for description (default: English)")
     parser.add_argument("--structured-output", action="store_true", help="request JSON Schema, falling back on rejection")
     parser.add_argument("--timeout", type=float, default=120, help="API timeout in seconds (default: 120)")
     parser.add_argument("--retries", type=int, default=5, metavar="N",
                         help="maximum LLM requests per image (default: 5; 0 retries indefinitely)")
     args = parser.parse_args(argv)
+    args.description_language = args.description_language.strip()
+    if not args.description_language or any(char in args.description_language for char in "\r\n"):
+        parser.error("--description-language must be a nonempty single-line language name")
     destination = args.append or args.output or Path("lenzcontext.yaml")
     fmt = "%(levelname)s: %(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
     logging.basicConfig(level=logging.INFO, format=fmt)
@@ -109,7 +114,8 @@ def main(argv: list[str] | None = None) -> int:
             geocoder = ReverseGeocoder(database)
         except (OSError, sqlite3.Error):
             LOG.warning("GeoNames database unavailable; continuing without addresses (run the importer)")
-        pipeline = Pipeline(OpenAICompatibleAnalyzer(settings, prompts), geocoder)
+        pipeline = Pipeline(OpenAICompatibleAnalyzer(
+            settings, prompts, description_language=args.description_language), geocoder)
         try:
             batch = process_batch(args.images, pipeline, on_success=writer.write)
         except OSError:

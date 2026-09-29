@@ -3,7 +3,8 @@
 LenzContext analyzes JPEGs in input order and writes their context to **one YAML
 file**. It extracts EXIF capture time and GPS locally, resolves approximate
 addresses with a local GeoNames SQLite database, and asks a configurable vision
-LLM for an English description, original-language OCR, and screenshot probability.
+LLM for an English description, a description in the requested language,
+original-language OCR, and screenshot probability.
 
 ## Requirements and installation
 
@@ -115,6 +116,9 @@ lenzcontext IMG_001.jpg
 # Batch, preserving the exact argument order; PNG is warned about and skipped:
 lenzcontext C.jpg A.JPEG screenshot.png B.jpg -o result.yaml
 
+# Describe images in Japanese as well as English:
+lenzcontext IMG_001.jpg --description-language Japanese -o result.yaml
+
 # Add another batch to an existing output file (or create it if absent):
 lenzcontext more/*.jpg -a result.yaml
 
@@ -136,6 +140,9 @@ version and exits, while `-V/--verbose` enables DEBUG logging for the run.
 `lenzcontext.yaml`.
 `--timeout` applies to each request attempt. A series of timeouts can therefore
 take much longer than one timeout period, especially with `--retries 0`.
+`--description-language` accepts a language name and defaults to `English`.
+When English is selected, the prompt asks the model to make `description`
+identical to `description_en`.
 
 Each successful image is written to the YAML file as soon as it finishes. To
 watch an existing output while the batch runs, use `tail -f lenzcontext.yaml`;
@@ -167,14 +174,17 @@ Templates use standard-library `string.Template`:
 
 - `${address}` becomes `Address:` followed by `English:` and `Local:` lines.
 - `${taken_at}` becomes `Capture time: ...`.
+- `${description_language}` becomes the language named by `--description-language`.
 - Missing metadata becomes an empty string; no `unknown` labels are added.
 - Unknown placeholders and malformed `$` syntax are configuration errors.
 - Use `$$` for a literal dollar sign.
 
 Keep JSON output instructions in custom prompts, especially when using the default
-compatibility mode. The default prompts ask for a 120–180 character English
-description (a target, not a truncation rule), preserve OCR spelling/script with
-single-space separators, and prevent unsupported location claims based only on supplied context.
+compatibility mode. Custom prompts must request both `description_en` and
+`description` in the JSON response. The default prompts ask for a 120–180
+character English description (a target, not a truncation rule), preserve OCR
+spelling/script with single-space separators, and prevent unsupported location
+claims based only on supplied context.
 Screenshot estimates primarily use visible UI features, not missing EXIF.
 
 ### Reasoning controls
@@ -234,6 +244,7 @@ images:
       local: 대한민국 서울특별시 중구
     analysis:
       description_en: A busy street with pedestrians and illuminated storefronts.
+      description: 歩行者と明かりのついた店が並ぶにぎやかな通り。
       ocr:
         detected: true
         text: 서울역 Welcome to Seoul
@@ -247,11 +258,14 @@ images:
     address: null
     analysis:
       description_en: Food on a white plate beside a drink on a wooden table.
+      description: 白い皿に盛られた料理と、木製のテーブルに置かれた飲み物。
       ocr:
         detected: false
         text: ''
       screenshot_probability: 0.01
 ```
+
+The example shows output with `--description-language Japanese`.
 
 OCR text is normalized after string type validation: consecutive whitespace
 (including LF/CRLF, tabs, full-width spaces, and nonbreaking spaces) becomes one

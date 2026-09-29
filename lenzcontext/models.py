@@ -40,6 +40,7 @@ class OCRResult(Model):
 
 class AnalysisResult(Model):
     description_en: str = Field(min_length=1)
+    description: str = Field(min_length=1)
     ocr: OCRResult
     screenshot_probability: float = Field(ge=0.0, le=1.0)
 
