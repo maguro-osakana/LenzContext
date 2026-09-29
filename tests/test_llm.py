@@ -17,10 +17,10 @@ def response(analysis):
     return {"choices": [{"finish_reason": "stop", "message": {"content": analysis.model_dump_json()}}]}
 
 
-def analyzer(transport, structured=False):
+def analyzer(transport, structured=False, retries=5):
     return OpenAICompatibleAnalyzer(
         Settings(api_base="http://localhost:8080/v1", model="test-vision", api_key="test-secret",
-                 structured_output=structured),
+                 structured_output=structured, retries=retries),
         replace(load_prompts(Path("config/prompts.yaml")), reasoning=None), transport,
     )
 
@@ -55,14 +55,36 @@ def test_validation_retry_once(analysis):
     assert len(calls) == 2
 
 
-def test_exhausted_retry():
+def test_default_five_total_attempts_after_invalid_analysis():
     calls = []
     def transport(*args):
         calls.append(1)
         return {"choices": []}
     with pytest.raises(LLMError):
         analyzer(transport).analyze(b"jpeg", None, None)
-    assert len(calls) == 2
+    assert len(calls) == 5
+
+
+@pytest.mark.parametrize("retries", [1, 2, 5])
+def test_custom_retry_limit_for_invalid_analysis(retries):
+    calls = []
+    def transport(*args):
+        calls.append(1)
+        return {"choices": []}
+    with pytest.raises(LLMError):
+        analyzer(transport, retries=retries).analyze(b"jpeg", None, None)
+    assert len(calls) == retries
+
+
+def test_zero_retries_setting_retries_until_success(analysis):
+    calls = []
+    def transport(*args):
+        calls.append(1)
+        if len(calls) <= 7:
+            return {"choices": []}
+        return response(analysis)
+    assert analyzer(transport, retries=0).analyze(b"jpeg", None, None) == analysis
+    assert len(calls) == 8
 
 
 def test_structured_output_fallback(analysis):
@@ -104,6 +126,37 @@ def test_transient_failure_retry(analysis, status):
         return response(analysis)
     assert analyzer(transport).analyze(b"jpeg", None, None) == analysis
     assert len(calls) == 2
+
+
+def test_transient_failures_use_same_retry_limit():
+    calls = []
+    def transport(*args):
+        calls.append(1)
+        raise TransportError("temporary failure", 503)
+    with pytest.raises(TransportError):
+        analyzer(transport, retries=2).analyze(b"jpeg", None, None)
+    assert len(calls) == 2
+
+
+def test_mixed_failures_share_retry_budget(analysis):
+    calls = []
+    def transport(*args):
+        calls.append(1)
+        if len(calls) == 1:
+            raise TransportError("temporary failure", 503)
+        if len(calls) == 2:
+            return {"choices": []}
+        return response(analysis)
+    with pytest.raises(TransportError):
+        analyzer(transport, retries=1).analyze(b"jpeg", None, None)
+    assert len(calls) == 1
+    calls.clear()
+    with pytest.raises(LLMError):
+        analyzer(transport, retries=2).analyze(b"jpeg", None, None)
+    assert len(calls) == 2
+    calls.clear()
+    assert analyzer(transport, retries=3).analyze(b"jpeg", None, None) == analysis
+    assert len(calls) == 3
 
 
 def test_http_transport_serializes_request_and_sanitizes_errors(monkeypatch, analysis):

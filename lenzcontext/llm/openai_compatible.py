@@ -1,4 +1,4 @@
-"""Minimal Chat Completions vision adapter with at most one retry."""
+"""Chat Completions vision adapter with a configurable retry limit."""
 
 import base64
 import hashlib
@@ -7,6 +7,7 @@ import logging
 import time
 from collections.abc import Callable
 from http.client import HTTPException
+from itertools import count
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -156,16 +157,18 @@ class OpenAICompatibleAnalyzer:
         LOG.debug("LLM user prompt:\n%s", user)
         LOG.debug("LLM request payload (image bytes omitted): %s",
                   json.dumps(_redacted_payload(payload, len(jpeg), digest), ensure_ascii=False))
-        for attempt in range(2):
+        max_attempts = self.settings.retries
+        attempts = count(1) if max_attempts == 0 else range(1, max_attempts + 1)
+        for attempt in attempts:
             try:
                 LOG.debug("LLM request: attempt=%d reasoning_effort=%s thinking_token_budget=%s",
-                          attempt + 1, payload.get("reasoning_effort", "server default"),
+                          attempt, payload.get("reasoning_effort", "server default"),
                           payload.get("thinking_token_budget", "server default"))
                 started = time.perf_counter()
                 try:
                     response = self.transport(self.settings.completions_url, payload, headers, self.settings.timeout)
                 finally:
-                    LOG.debug("LLM request: attempt=%d elapsed=%.2fs", attempt + 1, time.perf_counter() - started)
+                    LOG.debug("LLM request: attempt=%d elapsed=%.2fs", attempt, time.perf_counter() - started)
                 return parse_response(response)
             except TransportError as exc:
                 if self.prompts.reasoning is not None and exc.status in {400, 404, 415, 422}:
@@ -179,11 +182,14 @@ class OpenAICompatibleAnalyzer:
                 if unsupported:
                     payload.pop("response_format")
                 retryable = unsupported or exc.status is None or exc.status == 429 or (exc.status >= 500)
-                if attempt or not retryable:
+                if (max_attempts and attempt >= max_attempts) or not retryable:
                     raise
-                LOG.warning("LLM request failed; retrying once%s", " without structured output" if unsupported else "")
+                LOG.warning("LLM request failed; retrying after attempt %d/%s%s", attempt,
+                            max_attempts or "unlimited",
+                            " without structured output" if unsupported else "")
             except LLMError:
-                if attempt:
+                if max_attempts and attempt >= max_attempts:
                     raise
-                LOG.warning("invalid LLM analysis; retrying once")
+                LOG.warning("invalid LLM analysis; retrying after attempt %d/%s", attempt,
+                            max_attempts or "unlimited")
         raise LLMError("LLM analysis failed")  # Unreachable; keeps the return type explicit.

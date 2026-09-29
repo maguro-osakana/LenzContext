@@ -48,6 +48,16 @@ def test_settings_hide_key_and_require_model():
         Settings(api_base="https://user:secret@example.org", model="vision")
 
 
+@pytest.mark.parametrize("retries", [-1, 1.5, "5", True, None])
+def test_invalid_retry_limit(retries):
+    with pytest.raises(ConfigError, match="retries"):
+        Settings(api_base="http://localhost", model="vision", retries=retries)
+
+
+def test_default_retry_limit():
+    assert Settings(api_base="http://localhost", model="vision").retries == 5
+
+
 def test_settings_from_dotenv(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     for key in ("LENZCONTEXT_API_BASE", "LENZCONTEXT_MODEL", "LENZCONTEXT_API_KEY"):

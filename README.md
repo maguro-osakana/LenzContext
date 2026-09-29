@@ -107,12 +107,16 @@ are rejected so the request stays at the configured endpoint.
 By default, JSON output instructions provide compatibility with servers that do
 not support `response_format`. Use `--structured-output` to request strict JSON
 Schema. When reasoning controls are omitted, an HTTP 400/404/415/422 rejection
-can use the one allowed retry without `response_format`. When reasoning controls
+can use a retry without `response_format`. When reasoning controls
 are configured, these statuses instead report a compatibility error without retrying
 or removing any controls, since the rejection may concern the reasoning settings.
 Malformed JSON/schema violations and transient connection,
-429, or 5xx errors also receive at most **one retry total per image**. Authentication
-errors do not retry. All responses undergo strict Pydantic validation, including
+429, or 5xx errors share a limit of **five requests per image by default**
+(the initial request plus up to four retries). `--retries N` sets the maximum
+total request count: `1` sends only the initial request, `5` sends up to five,
+and `0` retries eligible failures indefinitely. All failure types share the
+same limit. Authentication errors do not retry.
+All responses undergo strict Pydantic validation, including
 finite screenshot probability in `[0, 1]` and consistent OCR detection/text.
 
 The request formats follow the official OpenAI documentation for
@@ -132,9 +136,10 @@ lenzcontext C.jpg A.JPEG screenshot.png B.jpg -o result.yaml
 # Add another batch to an existing output file (or create it if absent):
 lenzcontext more/*.jpg -a result.yaml
 
-# Custom database, prompts, structured output, and timeout:
+# Custom database, prompts, structured output, timeout, and retries:
 lenzcontext *.jpg --geonames-db data/custom.db \
-  --prompt-config config/prompts.yaml --structured-output --timeout 90 -o result.yaml
+  --prompt-config config/prompts.yaml --structured-output --timeout 90 \
+  --retries 2 -o result.yaml
 
 # Print the version (-v):
 lenzcontext -v
@@ -147,6 +152,8 @@ The version and verbosity flags differ only by case: `-v/--version` prints the
 version and exits, while `-V/--verbose` enables DEBUG logging for the run.
 `-o FILE` and `-a FILE` are mutually exclusive. Without either, the output is
 `lenzcontext.yaml`.
+`--timeout` applies to each request attempt. A series of timeouts can therefore
+take much longer than one timeout period, especially with `--retries 0`.
 
 Each successful image is written to the YAML file as soon as it finishes. To
 watch an existing output while the batch runs, use `tail -f lenzcontext.yaml`;

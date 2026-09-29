@@ -189,3 +189,27 @@ def test_cli_output_cannot_replace_input_or_db(make_jpeg, tmp_path, flag):
     db.write_bytes(b"database")
     assert main([str(image), flag, str(db), "--geonames-db", str(db)]) == 2
     assert db.read_bytes() == b"database"
+
+
+@pytest.mark.parametrize("retries", [0, 2, 5])
+def test_cli_retries_option(monkeypatch, make_jpeg, tmp_path, analysis, retries):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    def analyze(self, *args):
+        assert self.settings.retries == retries
+        return analysis
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", analyze)
+    image = make_jpeg()
+    assert main([str(image), "--retries", str(retries), "-o", str(tmp_path / "out.yaml")]) == 0
+
+
+@pytest.mark.parametrize("value", ["-1", "not-a-number"])
+def test_cli_invalid_retries(monkeypatch, make_jpeg, tmp_path, value):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    args = [str(make_jpeg()), "--retries", value, "-o", str(tmp_path / "out.yaml")]
+    if value == "-1":
+        assert main(args) == 2
+    else:
+        with pytest.raises(SystemExit) as raised:
+            main(args)
+        assert raised.value.code == 2
+    assert not (tmp_path / "out.yaml").exists()

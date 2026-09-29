@@ -62,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prompt-config", type=Path, default=None, help="default: config/prompts.yaml")
     parser.add_argument("--structured-output", action="store_true", help="request JSON Schema, falling back on rejection")
     parser.add_argument("--timeout", type=float, default=120, help="API timeout in seconds (default: 120)")
+    parser.add_argument("--retries", type=int, default=5, metavar="N",
+                        help="maximum LLM requests per image (default: 5; 0 retries indefinitely)")
     args = parser.parse_args(argv)
     destination = args.append or args.output or Path("lenzcontext.yaml")
     fmt = "%(levelname)s: %(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
@@ -72,9 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("lenzcontext").setLevel(logging.DEBUG)
     else:
         logging.getLogger("lenzcontext").setLevel(logging.INFO)
-    LOG.debug("inputs=%d geonames_db=%s prompt_config=%s output=%s structured_output=%s timeout=%s",
+    LOG.debug("inputs=%d geonames_db=%s prompt_config=%s output=%s structured_output=%s timeout=%s retries=%s",
               len(args.images), args.geonames_db, args.prompt_config or "<auto>",
-              destination, args.structured_output, args.timeout)
+              destination, args.structured_output, args.timeout, args.retries)
     if any(destination.resolve() == image.resolve() for image in args.images):
         LOG.error("output must not overwrite an input image")
         return 2
@@ -82,7 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         LOG.error("output must not overwrite the GeoNames database")
         return 2
     try:
-        settings = Settings.from_env(structured_output=args.structured_output, timeout=args.timeout)
+        settings = Settings.from_env(structured_output=args.structured_output, timeout=args.timeout,
+                                     retries=args.retries)
         prompts = load_prompts(args.prompt_config)
     except ConfigError as exc:
         LOG.error("configuration error: %s", exc)

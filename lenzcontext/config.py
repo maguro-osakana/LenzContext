@@ -92,6 +92,7 @@ class Settings:
     api_key: str = field(default="", repr=False)
     timeout: float = 120.0
     structured_output: bool = False
+    retries: int = 5
 
     def __post_init__(self) -> None:
         try:
@@ -109,6 +110,8 @@ class Settings:
             raise ConfigError("set LENZCONTEXT_MODEL to a vision-capable model")
         if not math.isfinite(self.timeout) or self.timeout <= 0:
             raise ConfigError("API timeout must be positive and finite")
+        if type(self.retries) is not int or self.retries < 0:
+            raise ConfigError("retries must be a non-negative integer")
         if "\r" in self.api_key or "\n" in self.api_key:
             raise ConfigError("API key contains an invalid newline")
 
@@ -120,7 +123,8 @@ class Settings:
         return base + "/chat/completions"
 
     @classmethod
-    def from_env(cls, *, structured_output: bool = False, timeout: float = 120) -> "Settings":
+    def from_env(cls, *, structured_output: bool = False, timeout: float = 120,
+                 retries: int = 5) -> "Settings":
         try:
             values = {
                 key: value for key, value in dotenv_values(
@@ -135,5 +139,6 @@ class Settings:
             api_key=values.get("LENZCONTEXT_API_KEY", ""),
             model=values.get("LENZCONTEXT_MODEL", ""),
             timeout=timeout,
+            retries=retries,
             structured_output=structured_output,
         )
