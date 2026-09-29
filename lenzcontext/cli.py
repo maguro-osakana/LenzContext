@@ -3,6 +3,7 @@
 import argparse
 import logging
 import sqlite3
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,7 +30,7 @@ def process_batch(paths: list[Path], pipeline: Pipeline,
             LOG.warning("skipping non-JPEG file: %s", path)
             skipped += 1
             continue
-        LOG.info("processing %s", path)
+        started = time.perf_counter()
         try:
             image = pipeline.process(path)
         except (OSError, InvalidJPEG):
@@ -46,6 +47,8 @@ def process_batch(paths: list[Path], pipeline: Pipeline,
             if on_success is not None:
                 on_success(image)
             images.append(image)
+        finally:
+            LOG.info("processing %s (%.2fs)", path, time.perf_counter() - started)
     LOG.debug("batch summary: %d succeeded, %d skipped, %d failed", len(images), skipped, failed)
     return BatchResult(images=images)
 
