@@ -2,7 +2,7 @@
 
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Model(BaseModel):
@@ -23,6 +23,11 @@ class Address(Model):
 class OCRResult(Model):
     detected: bool
     text: str
+
+    @field_validator("text", mode="after")
+    @classmethod
+    def normalize_whitespace(cls, text: str) -> str:
+        return " ".join(text.split())
 
     @model_validator(mode="after")
     def consistent_detection(self) -> Self:

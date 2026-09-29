@@ -170,18 +170,19 @@ Templates use standard-library `string.Template`:
 
 Keep JSON output instructions in custom prompts, especially when using the default
 compatibility mode. The default prompts ask for a 120–180 character English
-description (a target, not a truncation rule), preserve OCR spelling/script/line
-breaks, and prevent unsupported location claims based only on supplied context.
+description (a target, not a truncation rule), preserve OCR spelling/script with
+single-space separators, and prevent unsupported location claims based only on supplied context.
 Screenshot estimates primarily use visible UI features, not missing EXIF.
 
 ### Reasoning controls
 
-The supplied configuration enables reasoning with a small token budget:
+The supplied configuration disables reasoning. Set `enabled: true` to enable
+reasoning with the configured token budget:
 
 ```yaml
 vision:
   reasoning:
-    enabled: true
+    enabled: false
     token_budget: 512
   system: |-
     # Keep your existing system prompt here.
@@ -232,9 +233,7 @@ images:
       description_en: A busy street with pedestrians and illuminated storefronts.
       ocr:
         detected: true
-        text: |-
-          서울역
-          Welcome to Seoul
+        text: 서울역 Welcome to Seoul
       screenshot_probability: 0.02
   - file:
       name: IMG_002.jpg
@@ -251,7 +250,14 @@ images:
       screenshot_probability: 0.01
 ```
 
-PyYAML writes Unicode directly and preserves multiline OCR. File names are base
+OCR text is normalized after string type validation: consecutive whitespace
+(including LF/CRLF, tabs, full-width spaces, and nonbreaking spaces) becomes one
+ASCII space (`0x20`), and leading/trailing whitespace is removed. Other characters
+are preserved. Whitespace-only text becomes empty; `detected: true` with empty
+text remains a validation error. This normalization applies to the stored OCR
+value, not YAML formatting or the raw model response shown in verbose logs.
+
+PyYAML writes Unicode directly. File names are base
 names; paths are not included. Output is replaced atomically after processing.
 The output directory must already exist.
 

@@ -168,6 +168,16 @@ def test_invalid_response_content_is_logged(caplog):
     assert "not JSON" in caplog.text
 
 
+def test_response_ocr_normalized_after_raw_logging(caplog, analysis):
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    data = analysis.model_dump()
+    data["ocr"]["text"] = "  서울역\r\nWelcome\t出口　 "
+    raw = json.dumps(data, ensure_ascii=False)
+    result = parse_response({"choices": [{"message": {"content": raw}}]})
+    assert result.ocr.text == "서울역 Welcome 出口"
+    assert raw in caplog.text
+
+
 @pytest.mark.parametrize("enabled,token_budget,expected", [
     (False, 4096, {"reasoning_effort": "none"}),
     (True, 512, {"reasoning_effort": "low", "thinking_token_budget": 512}),

@@ -2,7 +2,8 @@ vision:
   # Requires a server/model supporting reasoning_effort and thinking_token_budget.
   # Remove this section to use server defaults without sending reasoning controls.
   reasoning:
-    enabled: true
+    enabled: false
+    # enabled: true
     token_budget: 512  # Positive integer; not applied when enabled is false
   system: |-
     You analyze JPEG images and return structured metadata.
@@ -23,7 +24,8 @@ vision:
     1. Write a concise English description of the visible image content.
        Target approximately 120-180 English characters.
     2. Extract readable text from the image. Preserve the original language,
-       script, spelling, and line breaks. Do not translate, correct, or invent
+       script and spelling. Separate lines and words with a single space.
+       Do not translate, correct, or invent
        unreadable characters. If no text is readable, use detected=false and text="".
     3. Estimate the probability that this image is a screenshot, from 0.0 to 1.0.
        Use visual clues such as status bars, browser chrome, buttons, menus,
@@ -32,6 +34,6 @@ vision:
     Return JSON with exactly these fields and types:
     {
       "description_en": "English description",
-      "ocr": {"detected": true, "text": "Original text with line breaks"},
+      "ocr": {"detected": true, "text": "Original text"},
       "screenshot_probability": 0.0
     }
