@@ -92,3 +92,16 @@ def test_default_logging_stays_at_info(monkeypatch, make_jpeg, tmp_path, analysi
     args = [str(make_jpeg()), "-o", str(output), "--geonames-db", str(tmp_path / "missing.db")]
     assert main(args) == 0
     assert "inputs=1" not in caplog.text
+
+
+def test_invalid_reasoning_fails_before_analysis(monkeypatch, make_jpeg, tmp_path, caplog):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    analyze = Mock()
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", analyze)
+    config = tmp_path / "prompts.yaml"
+    config.write_text("vision:\n  system: s\n  user: u\n  reasoning:\n    enabled: true\n    token_budget: 0\n")
+    output = tmp_path / "out.yaml"
+    assert main([str(make_jpeg()), "--prompt-config", str(config), "-o", str(output)]) == 2
+    analyze.assert_not_called()
+    assert not output.exists()
+    assert "vision.reasoning.token_budget" in caplog.text

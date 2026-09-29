@@ -19,9 +19,31 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class Reasoning:
+    enabled: bool
+    token_budget: int = 512
+
+    def __post_init__(self) -> None:
+        if type(self.enabled) is not bool:
+            raise ConfigError("vision.reasoning.enabled must be true or false")
+        if type(self.token_budget) is not int or self.token_budget <= 0:
+            raise ConfigError("vision.reasoning.token_budget must be a positive integer")
+
+    def request_parameters(self) -> dict:
+        if not self.enabled:
+            return {"reasoning_effort": "none"}
+        return {
+            # Enable the verified thinking mode; control its limit separately.
+            "reasoning_effort": "low",
+            "thinking_token_budget": self.token_budget,
+        }
+
+
+@dataclass(frozen=True)
 class Prompts:
     system: str
     user: str
+    reasoning: Reasoning | None = None
 
     def render(self, address: Address | None, taken_at: str | None) -> tuple[str, str]:
         context = {
@@ -45,11 +67,20 @@ def load_prompts(path: Path | None = None) -> Prompts:
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         vision = data["vision"]
-        prompts = Prompts(system=vision["system"], user=vision["user"])
+        reasoning = None
+        if "reasoning" in vision:
+            raw = vision["reasoning"]
+            if (not isinstance(raw, dict) or "enabled" not in raw
+                    or set(raw) - {"enabled", "token_budget"}):
+                raise ConfigError("vision.reasoning requires enabled and accepts only enabled, token_budget")
+            reasoning = Reasoning(**raw)
+        prompts = Prompts(system=vision["system"], user=vision["user"], reasoning=reasoning)
         if not all(isinstance(v, str) and v.strip() for v in (prompts.system, prompts.user)):
             raise ValueError("vision.system and vision.user must be nonempty strings")
         prompts.render(None, None)
         return prompts
+    except ConfigError:
+        raise
     except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as exc:
         raise ConfigError("invalid prompt configuration: check YAML and ${address}/${taken_at} placeholders") from exc
 

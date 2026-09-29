@@ -106,8 +106,11 @@ are rejected so the request stays at the configured endpoint.
 
 By default, JSON output instructions provide compatibility with servers that do
 not support `response_format`. Use `--structured-output` to request strict JSON
-Schema. If the server rejects it with HTTP 400/404/415/422, the one allowed retry
-omits `response_format`. Malformed JSON/schema violations and transient connection,
+Schema. When reasoning controls are omitted, an HTTP 400/404/415/422 rejection
+can use the one allowed retry without `response_format`. When reasoning controls
+are configured, these statuses instead report a compatibility error without retrying
+or removing any controls, since the rejection may concern the reasoning settings.
+Malformed JSON/schema violations and transient connection,
 429, or 5xx errors also receive at most **one retry total per image**. Authentication
 errors do not retry. All responses undergo strict Pydantic validation, including
 finite screenshot probability in `[0, 1]` and consistent OCR detection/text.
@@ -171,6 +174,46 @@ description (a target, not a truncation rule), preserve OCR spelling/script/line
 breaks, and prevent unsupported location claims based only on supplied context.
 Screenshot estimates primarily use visible UI features, not missing EXIF.
 
+### Reasoning controls
+
+The supplied configuration enables reasoning with a small token budget:
+
+```yaml
+vision:
+  reasoning:
+    enabled: true
+    token_budget: 512
+  system: |-
+    # Keep your existing system prompt here.
+  user: |-
+    # Keep your existing user prompt here.
+```
+
+Set `enabled: false` to disable reasoning; the token budget is then not applied.
+Remove the entire `reasoning` section to preserve server defaults and send no
+reasoning controls. Existing prompt files without this section remain supported.
+`enabled` must be a YAML boolean (`true`/`false`). `token_budget` defaults to 512
+and must be a positive integer, even when reasoning is disabled. Invalid settings
+fail before any API request. The former `effort` and `token_budgets` fields are
+no longer accepted; replace them with a single `token_budget` value.
+
+The budget is a **reasoning token limit**, not a fixed token count or time limit.
+With reasoning enabled, the adapter sends `reasoning_effort: low` and
+`thinking_token_budget` with the configured limit. With reasoning disabled it
+sends `reasoning_effort: none` and omits the budget. The use of `low` is deliberate:
+it enables the thinking mode verified on the local DeepSeek deployment, while
+the budget controls the token limit. Normal answer tokens are separate from the
+reasoning budget.
+
+This requires compatible server/model support. vLLM must support
+[`thinking_token_budget` and reasoning mode control](https://docs.vllm.ai/en/latest/features/reasoning_outputs/)
+with an appropriate reasoning parser/template. An HTTP success alone does not
+guarantee a different server honored the settings; inspect verbose usage when
+switching models. Rejected controls are never silently removed. Smaller budgets
+can reduce latency but may affect OCR and description quality. The default
+120-second request timeout still applies; use `--timeout` if needed for larger
+budgets.
+
 ## Output
 
 ```yaml
@@ -225,7 +268,15 @@ never logged.
 because it dumps raw EXIF tags) and adds EXIF capture time and coordinates,
 reverse-geocoding candidates and the selected place, rendered prompts, the LLM
 request payload with the base64 image replaced by its byte length and SHA-256
-prefix, and the assistant's returned text. Verbose logs can therefore contain GPS
+prefix, and the assistant's returned text and reasoning (`reasoning`, with
+`reasoning_content` as a compatibility fallback). Each request attempt logs its
+reasoning settings and elapsed time, including failed attempts. Response usage
+logs input (`prompt`), generated (`completion`), reasoning, and total tokens.
+Completion tokens include reasoning tokens, so do not add those counts together.
+Missing counts are `unknown`, not zero. Diagnostics are printed after the
+non-streaming response completes; they are not live generation progress.
+Reasoning and usage are also logged for received responses that fail validation.
+Verbose logs can therefore contain GPS
 coordinates and OCR text from the image; redact them before sharing.
 
 - Exit `0`: at least one successful record was written, even if others failed.

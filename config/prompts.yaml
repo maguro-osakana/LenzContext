@@ -1,4 +1,9 @@
 vision:
+  # Requires a server/model supporting reasoning_effort and thinking_token_budget.
+  # Remove this section to use server defaults without sending reasoning controls.
+  reasoning:
+    enabled: true
+    token_budget: 512  # Positive integer; not applied when enabled is false
   system: |-
     You analyze JPEG images and return structured metadata.
     Follow the requested output schema exactly. Return only a JSON object.

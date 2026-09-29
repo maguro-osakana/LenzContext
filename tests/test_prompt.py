@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from lenzcontext.config import ConfigError, Prompts, Settings, load_prompts
 from lenzcontext.models import Address
@@ -76,3 +77,48 @@ def test_settings_without_dotenv(monkeypatch, tmp_path):
     assert settings.model == "environment-vision"
     assert settings.api_base == "https://api.openai.com/v1"
     assert settings.api_key == ""
+
+
+def test_legacy_prompt_without_reasoning(tmp_path):
+    path = tmp_path / "prompts.yaml"
+    path.write_text("vision:\n  system: system\n  user: user\n")
+    assert load_prompts(path).reasoning is None
+
+
+def test_custom_reasoning_budget(tmp_path):
+    path = tmp_path / "prompts.yaml"
+    path.write_text(yaml.safe_dump({"vision": {"system": "s", "user": "u", "reasoning": {
+        "enabled": True, "token_budget": 200,
+    }}}))
+    assert load_prompts(path).reasoning.request_parameters() == {
+        "reasoning_effort": "low", "thinking_token_budget": 200,
+    }
+
+
+@pytest.mark.parametrize("reasoning", [
+    None, [], "off", {}, {"enabled": "false"}, {"enabled": 0},
+    {"enabled": True, "effort": "min"},
+    {"enabled": True, "token_budgets": {"min": 512, "mid": 1536, "max": 4096}},
+    {"enabled": True, "unknown": 1},
+    {"enabled": True, "token_budget": None},
+    {"enabled": True, "token_budget": True},
+    {"enabled": True, "token_budget": 0},
+    {"enabled": True, "token_budget": -1},
+    {"enabled": True, "token_budget": 1.5},
+    {"enabled": True, "token_budget": "512"},
+    {"enabled": True, "token_budget": []},
+    {"enabled": False, "token_budget": 0},
+])
+def test_invalid_reasoning_configuration(tmp_path, reasoning):
+    path = tmp_path / "prompts.yaml"
+    path.write_text(yaml.safe_dump({"vision": {"system": "s", "user": "u", "reasoning": reasoning}}))
+    with pytest.raises(ConfigError, match="vision.reasoning"):
+        load_prompts(path)
+
+
+def test_reasoning_defaults(tmp_path):
+    path = tmp_path / "prompts.yaml"
+    path.write_text("vision:\n  system: s\n  user: u\n  reasoning:\n    enabled: true\n")
+    assert load_prompts(path).reasoning.request_parameters() == {
+        "reasoning_effort": "low", "thinking_token_budget": 512,
+    }

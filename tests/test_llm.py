@@ -2,11 +2,12 @@ import base64
 import copy
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from lenzcontext.config import Settings, load_prompts
+from lenzcontext.config import Reasoning, Settings, load_prompts
 from lenzcontext.llm.base import LLMError
 from lenzcontext.llm.openai_compatible import OpenAICompatibleAnalyzer, TransportError, parse_response
 from lenzcontext.models import Address
@@ -20,7 +21,7 @@ def analyzer(transport, structured=False):
     return OpenAICompatibleAnalyzer(
         Settings(api_base="http://localhost:8080/v1", model="test-vision", api_key="test-secret",
                  structured_output=structured),
-        load_prompts(Path("config/prompts.yaml")), transport,
+        replace(load_prompts(Path("config/prompts.yaml")), reasoning=None), transport,
     )
 
 
@@ -165,3 +166,106 @@ def test_invalid_response_content_is_logged(caplog):
     with pytest.raises(LLMError):
         parse_response({"choices": [{"message": {"content": "not JSON"}}]})
     assert "not JSON" in caplog.text
+
+
+@pytest.mark.parametrize("enabled,token_budget,expected", [
+    (False, 4096, {"reasoning_effort": "none"}),
+    (True, 512, {"reasoning_effort": "low", "thinking_token_budget": 512}),
+    (True, 1024, {"reasoning_effort": "low", "thinking_token_budget": 1024}),
+    (True, 4096, {"reasoning_effort": "low", "thinking_token_budget": 4096}),
+])
+def test_reasoning_request(enabled, token_budget, expected, analysis):
+    def transport(url, payload, *args):
+        controls = {k: v for k, v in payload.items() if k in {"reasoning_effort", "thinking_token_budget"}}
+        assert controls == expected
+        return response(analysis)
+    client = analyzer(transport)
+    client.prompts = replace(client.prompts, reasoning=Reasoning(enabled=enabled, token_budget=token_budget))
+    assert client.analyze(b"jpeg", None, None) == analysis
+
+
+def test_omitted_reasoning_sends_no_controls(analysis):
+    def transport(url, payload, *args):
+        assert "reasoning_effort" not in payload
+        assert "thinking_token_budget" not in payload
+        return response(analysis)
+    assert analyzer(transport).analyze(b"jpeg", None, None) == analysis
+
+
+@pytest.mark.parametrize("status", [400, 404, 415, 422])
+@pytest.mark.parametrize("structured", [False, True])
+def test_reasoning_rejection_does_not_remove_controls_or_retry(status, structured):
+    calls = []
+    def transport(url, payload, *args):
+        calls.append(copy.deepcopy(payload))
+        raise TransportError("rejected", status)
+    client = analyzer(transport, structured)
+    client.prompts = replace(client.prompts, reasoning=Reasoning(enabled=True))
+    with pytest.raises(LLMError, match="check server/model support"):
+        client.analyze(b"jpeg", None, None)
+    assert len(calls) == 1
+    assert calls[0]["thinking_token_budget"] == 512
+
+
+@pytest.mark.parametrize("key", ["reasoning", "reasoning_content"])
+def test_reasoning_and_usage_logging(key, caplog, analysis):
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    result = response(analysis)
+    result["choices"][0]["message"][key] = "Inspecting visible text."
+    result["usage"] = {"prompt_tokens": 1375, "completion_tokens": 2798, "total_tokens": 4173,
+                       "completion_tokens_details": {"reasoning_tokens": 2697}}
+    assert parse_response(result) == analysis
+    assert "Inspecting visible text." in caplog.text
+    assert "prompt=1375 completion=2798 reasoning=2697 total=4173" in caplog.text
+
+
+@pytest.mark.parametrize("usage", [None, {}, {"completion_tokens_details": None}, [],
+                                  {"prompt_tokens": "invalid", "completion_tokens_details": []}])
+def test_optional_usage_is_not_required(usage, caplog, analysis):
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    result = response(analysis)
+    result["usage"] = usage
+    assert parse_response(result) == analysis
+    assert "prompt=unknown completion=unknown reasoning=unknown total=unknown" in caplog.text
+
+
+def test_zero_reasoning_and_info_logs(caplog, analysis):
+    result = response(analysis)
+    result["choices"][0]["message"]["reasoning"] = "Private reasoning text"
+    result["usage"] = {"completion_tokens_details": {"reasoning_tokens": 0}}
+    caplog.set_level(logging.INFO, logger="lenzcontext")
+    assert parse_response(result) == analysis
+    assert "Private reasoning text" not in caplog.text
+    assert "LLM usage" not in caplog.text
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    parse_response(result)
+    assert "reasoning=0" in caplog.text
+
+
+def test_failed_response_logs_reasoning_before_validation(caplog, analysis):
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    result = response(analysis)
+    result["choices"][0].update(finish_reason="length")
+    result["choices"][0]["message"]["reasoning"] = "Unfinished reasoning"
+    with pytest.raises(LLMError):
+        parse_response(result)
+    assert "Unfinished reasoning" in caplog.text
+
+
+def test_retry_logs_each_attempt_and_preserves_controls(monkeypatch, caplog, analysis):
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    clock = iter([10.0, 12.0, 20.0, 23.0])
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.time.perf_counter", lambda: next(clock))
+    calls = []
+    def transport(url, payload, *args):
+        calls.append(copy.deepcopy(payload))
+        if len(calls) == 1:
+            raise TransportError("unavailable", 503)
+        return response(analysis)
+    client = analyzer(transport)
+    client.prompts = replace(client.prompts, reasoning=Reasoning(enabled=True))
+    assert client.analyze(b"jpeg", None, None) == analysis
+    assert calls[0] == calls[1]
+    assert "attempt=1 elapsed=2.00s" in caplog.text
+    assert "attempt=2 elapsed=3.00s" in caplog.text
+    assert "reasoning_effort=low thinking_token_budget=512" in caplog.text
