@@ -3,6 +3,22 @@ __pycache__/
 *.pyc
 .env
 data/*.db
-.DS_Store
 data/*.txt
 data/*.zip
+data/geonames-src/
+sample/
+result.yaml
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Test cache
+.pytest_cache/
+
+# Default CLI output
+/lenzcontext.yaml
+
+# macOS metadata
+.DS_Store
