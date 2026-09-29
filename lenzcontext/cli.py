@@ -61,18 +61,18 @@ def main(argv: list[str] | None = None) -> int:
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("-o", "--output", type=Path, help="output YAML file (default: lenzcontext.yaml)")
     output_group.add_argument("-a", "--append", type=Path, metavar="FILE", help="append records to an existing YAML file")
-    parser.add_argument("--geonames-db", type=Path, default=Path("data/geonames.db"))
-    parser.add_argument("--prompt-config", type=Path, default=None, help="default: config/prompts.yaml")
-    parser.add_argument("--description-language", default="English", metavar="LANGUAGE",
-                        help="language for description (default: English)")
+    parser.add_argument("--geonames-db", type=Path,
+                        help="GeoNames database (LENZCONTEXT_GEONAMES_DB; default: data/geonames.db)")
+    parser.add_argument("--prompt-config", type=Path,
+                        help="prompt file (LENZCONTEXT_PROMPT_CONFIG; default: auto-detect)")
+    parser.add_argument("--description-language", metavar="LANGUAGE",
+                        help="description language (LENZCONTEXT_DESCRIPTION_LANGUAGE; default: English)")
     parser.add_argument("--structured-output", action="store_true", help="request JSON Schema, falling back on rejection")
-    parser.add_argument("--timeout", type=float, default=120, help="API timeout in seconds (default: 120)")
-    parser.add_argument("--retries", type=int, default=5, metavar="N",
-                        help="maximum LLM requests per image (default: 5; 0 retries indefinitely)")
+    parser.add_argument("--timeout", type=float,
+                        help="API timeout in seconds (LENZCONTEXT_TIMEOUT; default: 120)")
+    parser.add_argument("--retries", type=int, metavar="N",
+                        help="maximum LLM requests per image (LENZCONTEXT_RETRIES; default: 5; 0 retries indefinitely)")
     args = parser.parse_args(argv)
-    args.description_language = args.description_language.strip()
-    if not args.description_language or any(char in args.description_language for char in "\r\n"):
-        parser.error("--description-language must be a nonempty single-line language name")
     destination = args.append or args.output or Path("lenzcontext.yaml")
     fmt = "%(levelname)s: %(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
     logging.basicConfig(level=logging.INFO, format=fmt)
@@ -82,19 +82,28 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("lenzcontext").setLevel(logging.DEBUG)
     else:
         logging.getLogger("lenzcontext").setLevel(logging.INFO)
-    LOG.debug("inputs=%d geonames_db=%s prompt_config=%s output=%s structured_output=%s timeout=%s retries=%s",
-              len(args.images), args.geonames_db, args.prompt_config or "<auto>",
-              destination, args.structured_output, args.timeout, args.retries)
+    try:
+        settings = Settings.from_env(
+            structured_output=args.structured_output, timeout=args.timeout, retries=args.retries,
+            geonames_db=args.geonames_db, prompt_config=args.prompt_config,
+            description_language=args.description_language,
+        )
+    except ConfigError as exc:
+        LOG.error("configuration error: %s", exc)
+        return 2
+    LOG.debug("inputs=%d geonames_db=%s prompt_config=%s output=%s structured_output=%s "
+              "timeout=%s retries=%s description_language=%s",
+              len(args.images), settings.geonames_db, settings.prompt_config or "<auto>",
+              destination, settings.structured_output, settings.timeout, settings.retries,
+              settings.description_language)
     if any(destination.resolve() == image.resolve() for image in args.images):
         LOG.error("output must not overwrite an input image")
         return 2
-    if destination.resolve() == args.geonames_db.resolve():
+    if destination.resolve() == settings.geonames_db.resolve():
         LOG.error("output must not overwrite the GeoNames database")
         return 2
     try:
-        settings = Settings.from_env(structured_output=args.structured_output, timeout=args.timeout,
-                                     retries=args.retries)
-        prompts = load_prompts(args.prompt_config)
+        prompts = load_prompts(settings.prompt_config)
     except ConfigError as exc:
         LOG.error("configuration error: %s", exc)
         return 2
@@ -110,12 +119,12 @@ def main(argv: list[str] | None = None) -> int:
     geocoder = None
     try:
         try:
-            database = GeoNamesDatabase(args.geonames_db)
+            database = GeoNamesDatabase(settings.geonames_db)
             geocoder = ReverseGeocoder(database)
         except (OSError, sqlite3.Error):
             LOG.warning("GeoNames database unavailable; continuing without addresses (run the importer)")
         pipeline = Pipeline(OpenAICompatibleAnalyzer(
-            settings, prompts, description_language=args.description_language), geocoder)
+            settings, prompts, description_language=settings.description_language), geocoder)
         try:
             batch = process_batch(args.images, pipeline, on_success=writer.write)
         except OSError:

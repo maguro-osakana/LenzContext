@@ -95,6 +95,9 @@ class Settings:
     timeout: float = 120.0
     structured_output: bool = False
     retries: int = 5
+    geonames_db: Path = Path("data/geonames.db")
+    prompt_config: Path | None = None
+    description_language: str = "English"
 
     def __post_init__(self) -> None:
         try:
@@ -114,6 +117,8 @@ class Settings:
             raise ConfigError("API timeout must be positive and finite")
         if type(self.retries) is not int or self.retries < 0:
             raise ConfigError("retries must be a non-negative integer")
+        if not self.description_language.strip() or any(char in self.description_language for char in "\r\n"):
+            raise ConfigError("description language must be a nonempty single-line language name")
         if "\r" in self.api_key or "\n" in self.api_key:
             raise ConfigError("API key contains an invalid newline")
 
@@ -125,8 +130,10 @@ class Settings:
         return base + "/chat/completions"
 
     @classmethod
-    def from_env(cls, *, structured_output: bool = False, timeout: float = 120,
-                 retries: int = 5) -> "Settings":
+    def from_env(cls, *, structured_output: bool = False, timeout: float | None = None,
+                 retries: int | None = None, geonames_db: Path | None = None,
+                 prompt_config: Path | None = None,
+                 description_language: str | None = None) -> "Settings":
         try:
             values = {
                 key: value for key, value in dotenv_values(
@@ -136,6 +143,30 @@ class Settings:
         except (OSError, UnicodeError) as exc:
             raise ConfigError("could not read .env in the working directory") from exc
         values.update(os.environ)
+
+        # Select overrides before conversion so unused environment values cannot
+        # invalidate an explicitly configured CLI option (including retries=0).
+        if timeout is None:
+            try:
+                timeout = float(values.get("LENZCONTEXT_TIMEOUT", "120"))
+            except ValueError:
+                raise ConfigError("LENZCONTEXT_TIMEOUT must be a positive finite number") from None
+        if retries is None:
+            try:
+                retries = int(values.get("LENZCONTEXT_RETRIES", "5"))
+            except ValueError:
+                raise ConfigError("LENZCONTEXT_RETRIES must be a non-negative integer") from None
+
+        def configured_path(override: Path | None, key: str, default: str | None) -> Path | None:
+            if override is not None:
+                return override
+            value = values.get(key, default)
+            if value is None:
+                return None
+            if not value.strip() or "\x00" in value:
+                raise ConfigError(f"{key} must be a nonempty valid path")
+            return Path(value)
+
         return cls(
             api_base=values.get("LENZCONTEXT_API_BASE", "https://api.openai.com/v1"),
             api_key=values.get("LENZCONTEXT_API_KEY", ""),
@@ -143,4 +174,8 @@ class Settings:
             timeout=timeout,
             retries=retries,
             structured_output=structured_output,
+            geonames_db=configured_path(geonames_db, "LENZCONTEXT_GEONAMES_DB", "data/geonames.db"),
+            prompt_config=configured_path(prompt_config, "LENZCONTEXT_PROMPT_CONFIG", None),
+            description_language=(description_language if description_language is not None else
+                                  values.get("LENZCONTEXT_DESCRIPTION_LANGUAGE", "English")).strip(),
         )

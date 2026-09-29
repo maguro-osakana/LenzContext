@@ -75,12 +75,38 @@ The CLI automatically reads `.env` from the **current working directory**; no
 The file is optional, so environment-only configuration still works. Quoted values
 and comments are supported; `${...}` expansion is disabled to preserve literal
 API key contents. `.env` is ignored by Git; `.env.sample` contains only examples.
+For options with a CLI flag, precedence is **CLI flag > environment variable >
+`.env` > built-in default**. Only the selected value is validated, so a CLI flag
+can override an invalid environment value.
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `LENZCONTEXT_API_BASE` | OpenAI-compatible API base URL | `https://api.openai.com/v1` |
 | `LENZCONTEXT_API_KEY` | Bearer token; may be empty for local servers | Empty |
 | `LENZCONTEXT_MODEL` | Vision-capable model identifier | Required |
+| `LENZCONTEXT_GEONAMES_DB` | Default for `--geonames-db` | `data/geonames.db` |
+| `LENZCONTEXT_PROMPT_CONFIG` | Default for `--prompt-config` | Automatic prompt discovery |
+| `LENZCONTEXT_DESCRIPTION_LANGUAGE` | Default for `--description-language` | `English` |
+| `LENZCONTEXT_TIMEOUT` | Default for `--timeout`, in seconds | `120` |
+| `LENZCONTEXT_RETRIES` | Default for `--retries`, maximum requests per image | `5` |
+
+Paths are relative to the working directory. Leave `LENZCONTEXT_PROMPT_CONFIG`
+unset to retain automatic prompt discovery. Empty path or language values are
+configuration errors. Timeout must be positive and finite; retries must be a
+non-negative integer (`0` retries indefinitely).
+
+For example, add these defaults to `.env`:
+
+```dotenv
+LENZCONTEXT_GEONAMES_DB=data/geonames.db
+LENZCONTEXT_PROMPT_CONFIG=config/prompts.yaml
+LENZCONTEXT_DESCRIPTION_LANGUAGE=Japanese
+LENZCONTEXT_TIMEOUT=90
+LENZCONTEXT_RETRIES=2
+```
+
+`lenzcontext IMG_001.jpg --description-language English --timeout 120` overrides
+the language and timeout while using the other configured defaults.
 
 The adapter appends `/chat/completions` to the base URL. A host-only URL gets
 `/v1` added; an explicit path is preserved. Requests contain a base64 JPEG data URL,
