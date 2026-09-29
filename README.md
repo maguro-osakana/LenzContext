@@ -23,11 +23,15 @@ model choice and no real API call is needed to install or run tests.
 
 ## GeoNames dataset setup
 
-Run `bash geonames_setup.sh` to download the GeoNames data, extract it, and create
-the database at `data/geonames.db`. The script requires `curl`, `unzip`, and the
-project's Python environment to be installed. Downloaded files are kept in
-`data/geonames-src/`. Generated files are excluded from Git and are not bundled
-with the Python package.
+`curl`, `unzip`, and the project environment are required to download and prepare
+the GeoNames dataset. Run the setup script to download the data and create the
+SQLite database at `data/geonames.db`:
+
+```bash
+bash geonames_setup.sh
+```
+
+Downloaded files are kept in `data/geonames-src/`.
 
 At runtime the database is read-only. RTree bounding boxes narrow candidates,
 then Haversine distance ranks populated places. Distance takes precedence over
