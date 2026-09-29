@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lenzcontext"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Batch JPEG context extraction with local GeoNames and vision LLMs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,9 @@ test = ["pytest>=8"]
 
 [project.scripts]
 lenzcontext = "lenzcontext.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "lenzcontext.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["lenzcontext*"]

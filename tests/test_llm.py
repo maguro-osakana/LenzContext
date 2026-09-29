@@ -1,6 +1,7 @@
 import base64
 import copy
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,28 @@ def test_incomplete_and_refused_responses(analysis):
     refused["choices"][0]["message"]["refusal"] = "refused"
     with pytest.raises(LLMError):
         parse_response(refused)
+
+
+def test_verbose_logs_redacted_llm_io(caplog, analysis):
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    jpeg = b"TOP-SECRET-IMAGE-BYTES"
+
+    def transport(url, payload, headers, timeout):
+        return response(analysis)
+
+    result = analyzer(transport).analyze(jpeg, Address(english="Seoul", local="서울"), "2026-01-01T00:00:00")
+    assert result == analysis
+    assert "LLM system prompt" in caplog.text
+    assert "LLM request payload (image bytes omitted)" in caplog.text
+    assert "image/jpeg;base64,<omitted" in caplog.text
+    assert "sha256=" in caplog.text
+    assert "LLM assistant content" in caplog.text
+    assert "test-secret" not in caplog.text
+    assert base64.b64encode(jpeg).decode() not in caplog.text
+
+
+def test_invalid_response_content_is_logged(caplog):
+    caplog.set_level(logging.DEBUG, logger="lenzcontext")
+    with pytest.raises(LLMError):
+        parse_response({"choices": [{"message": {"content": "not JSON"}}]})
+    assert "not JSON" in caplog.text

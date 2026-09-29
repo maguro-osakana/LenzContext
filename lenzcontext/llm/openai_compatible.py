@@ -1,6 +1,7 @@
 """Minimal Chat Completions vision adapter with at most one retry."""
 
 import base64
+import hashlib
 import json
 import logging
 from collections.abc import Callable
@@ -35,10 +36,12 @@ def send_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeou
     try:
         # Do not forward images or credentials to redirects from the configured endpoint.
         with build_opener(_NoRedirect()).open(request, timeout=timeout) as response:
+            LOG.debug("POST %s -> HTTP %s", url, getattr(response, "status", "unknown"))
             return json.load(response)
     except HTTPError as exc:
         status = exc.code
         exc.close()
+        LOG.debug("POST %s -> HTTP %s", url, status)
         raise TransportError(f"LLM API returned HTTP {status}", status) from None
     except (URLError, TimeoutError, OSError, HTTPException):
         raise TransportError("LLM API connection failed or timed out") from None
@@ -52,14 +55,37 @@ def parse_response(response: dict[str, Any]) -> AnalysisResult:
         if choice.get("finish_reason") not in {None, "stop"}:
             raise ValueError("incomplete response")
         message = choice["message"]
-        if message.get("refusal"):
+        refusal = message.get("refusal")
+        if refusal:
+            LOG.debug("LLM refused the request: %s", refusal)
             raise ValueError("refusal")
         content = message["content"]
         if not isinstance(content, str):
             raise ValueError("missing text response")
-        return AnalysisResult.model_validate_json(content)
-    except (KeyError, IndexError, TypeError, AttributeError, ValueError, ValidationError):
+    except (KeyError, IndexError, TypeError, AttributeError, ValueError):
         raise LLMError("LLM response is not valid analysis JSON") from None
+    LOG.debug("LLM assistant content: %s", content)
+    try:
+        return AnalysisResult.model_validate_json(content)
+    except (ValueError, ValidationError):
+        raise LLMError("LLM response is not valid analysis JSON") from None
+
+
+def _redacted_payload(payload: dict[str, Any], image_size: int, digest: str) -> dict[str, Any]:
+    """Copy the request payload for logging without embedding the JPEG bytes."""
+    placeholder = f"data:image/jpeg;base64,<omitted {image_size} bytes; sha256={digest}>"
+    redacted = {key: value for key, value in payload.items() if key != "messages"}
+    messages = []
+    for message in payload["messages"]:
+        content = message.get("content")
+        if isinstance(content, list):
+            content = [
+                {**part, "image_url": {"url": placeholder}} if part.get("type") == "image_url" else part
+                for part in content
+            ]
+        messages.append({**message, "content": content})
+    redacted["messages"] = messages
+    return redacted
 
 
 class OpenAICompatibleAnalyzer:
@@ -91,6 +117,14 @@ class OpenAICompatibleAnalyzer:
         headers = {"Content-Type": "application/json"}
         if self.settings.api_key:
             headers["Authorization"] = f"Bearer {self.settings.api_key}"
+        digest = hashlib.sha256(jpeg).hexdigest()[:16]
+        LOG.debug("LLM request: url=%s model=%s structured_output=%s image=%d bytes sha256=%s",
+                  self.settings.completions_url, self.settings.model,
+                  "response_format" in payload, len(jpeg), digest)
+        LOG.debug("LLM system prompt:\n%s", system)
+        LOG.debug("LLM user prompt:\n%s", user)
+        LOG.debug("LLM request payload (image bytes omitted): %s",
+                  json.dumps(_redacted_payload(payload, len(jpeg), digest), ensure_ascii=False))
         for attempt in range(2):
             try:
                 response = self.transport(self.settings.completions_url, payload, headers, self.settings.timeout)

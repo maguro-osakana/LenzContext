@@ -129,7 +129,16 @@ lenzcontext C.jpg A.JPEG screenshot.png B.jpg -o result.yaml
 # Custom database, prompts, structured output, and timeout:
 lenzcontext *.jpg --geonames-db data/custom.db \
   --prompt-config config/prompts.yaml --structured-output --timeout 90 -o result.yaml
+
+# Print the version (-v):
+lenzcontext -v
+
+# DEBUG diagnostics on stderr (-V):
+lenzcontext IMG_001.jpg -V
 ```
+
+The version and verbosity flags differ only by case: `-v/--version` prints the
+version and exits, while `-V/--verbose` enables DEBUG logging for the run.
 
 Shell globs are expanded by the shell; explicit arguments control ordering.
 JPEG extensions are case-insensitive. Pillow verifies that the content actually
@@ -209,7 +218,15 @@ Logs go to stderr; results go only to the YAML file. Non-JPEG and unreadable inp
 are warned about and skipped. Missing EXIF, GPS, capture time, or an address is
 normal. An unavailable database produces a warning and analysis continues without
 addresses. API failures are reported per image and remaining inputs continue.
-Provider response bodies and API keys are never logged.
+API keys, `Authorization` headers, raw provider HTTP bodies, and image bytes are
+never logged.
+
+`-V/--verbose` raises the application log level to DEBUG (Pillow stays at WARNING,
+because it dumps raw EXIF tags) and adds EXIF capture time and coordinates,
+reverse-geocoding candidates and the selected place, rendered prompts, the LLM
+request payload with the base64 image replaced by its byte length and SHA-256
+prefix, and the assistant's returned text. Verbose logs can therefore contain GPS
+coordinates and OCR text from the image; redact them before sharing.
 
 - Exit `0`: at least one successful record was written, even if others failed.
 - Exit `1`: no successful JPEGs, or writing output failed.
@@ -230,7 +247,9 @@ metadata) therefore travels inside the image file.** Preserving original bytes
 and guaranteeing that no embedded GPS leaves the machine are incompatible. If
 embedded metadata must not leave the machine, prepare a sanitized copy before
 using this tool, or use a trusted local LLM endpoint. LenzContext itself does not
-strip EXIF or preprocess the JPEG. The final local YAML intentionally contains GPS.
+strip EXIF or preprocess the JPEG. Even with `-V`, the JPEG bytes are never written
+to the log; only the image size and a SHA-256 prefix are recorded. The final local
+YAML intentionally contains GPS.
 
 ## Tests
 

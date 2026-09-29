@@ -64,6 +64,7 @@ def capture_time(tags: Mapping[int, Any]) -> str | None:
         offset = _text(tags.get(36881, ""))
         if re.fullmatch(r"[+-](?:[01]\d|2[0-3]):[0-5]\d", offset):
             result += offset
+        LOG.debug("capture time parsed from EXIF tag %s", tag)
         return result
     return None
 
@@ -101,6 +102,9 @@ def read_jpeg(path: Path) -> tuple[bytes, ExifInfo]:
                 gps = exif.get_ifd(34853)
             except (ValueError, TypeError, KeyError, IndexError, OSError, SyntaxError):
                 LOG.warning("malformed EXIF in %s; using readable metadata", path)
-            return data, parse_exif(tags, gps)
+            result = parse_exif(tags, gps)
+            LOG.debug("%s: taken_at=%s latitude=%s longitude=%s",
+                      path, result.taken_at or "none", result.latitude, result.longitude)
+            return data, result
     except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
         raise InvalidJPEG("cannot decode JPEG") from exc

@@ -1,5 +1,6 @@
 """Distance-first populated-place lookup and administrative address assembly."""
 
+import logging
 import math
 import sqlite3
 
@@ -8,6 +9,8 @@ from .database import EARTH_RADIUS_KM, GeoNamesDatabase
 from .language import localized_name, primary_language
 
 FEATURE_RANK = {"PPLC": 0, "PPLA": 1, "PPLA2": 2, "PPLA3": 3, "PPLA4": 4, "PPL": 5, "PPLX": 6}
+
+LOG = logging.getLogger(__name__)
 
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -39,16 +42,22 @@ class ReverseGeocoder:
         if not (math.isfinite(latitude) and math.isfinite(longitude)
                 and -90 <= latitude <= 90 and -180 <= longitude <= 180):
             raise ValueError("invalid coordinates")
+        LOG.debug("reverse geocoding (%.6f, %.6f); max distance %s km", latitude, longitude, self.max_distance_km)
         radii = sorted({min(r, self.max_distance_km) for r in (1, 5, 25, self.max_distance_km)})
         for radius in radii:
             candidates = self.database.candidates(latitude, longitude, radius)
+            LOG.debug("radius %s km: %d candidates", radius, len(candidates))
             ranked = sorted(
                 ((haversine(latitude, longitude, p["latitude"], p["longitude"]), p) for p in candidates),
                 key=lambda pair: (pair[0], FEATURE_RANK.get(pair[1]["feature_code"], 99),
                                   -pair[1]["population"], pair[1]["geoname_id"]),
             )
             if ranked and ranked[0][0] <= radius:
+                distance, place = ranked[0]
+                LOG.debug("selected %s (feature %s, population %s) at %.2f km",
+                          place["name"], place["feature_code"], place["population"], distance)
                 return self._address(ranked[0][1])
+        LOG.debug("no populated place within %s km", self.max_distance_km)
         return None
 
     def _address(self, place: sqlite3.Row) -> Address:

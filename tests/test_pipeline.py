@@ -1,8 +1,11 @@
+import logging
 import sqlite3
 from unittest.mock import Mock
 
+import pytest
 from PIL import Image
 
+from lenzcontext import __version__
 from lenzcontext.cli import main, process_batch
 from lenzcontext.llm.base import LLMError
 from lenzcontext.pipeline import Pipeline
@@ -60,3 +63,32 @@ def test_output_cannot_overwrite_input(monkeypatch, make_jpeg):
     before = path.read_bytes()
     assert main([str(path), "-o", str(path)]) == 2
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("flag", ["-v", "--version"])
+def test_version_flag(flag, capsys):
+    with pytest.raises(SystemExit) as raised:
+        main([flag])
+    assert raised.value.code == 0
+    assert capsys.readouterr().out.strip() == f"lenzcontext {__version__}"
+
+
+def test_verbose_flag_enables_debug_logging(monkeypatch, make_jpeg, tmp_path, analysis, caplog):
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", lambda *args: analysis)
+    output = tmp_path / "out.yaml"
+    args = [str(make_jpeg()), "-o", str(output), "--geonames-db", str(tmp_path / "missing.db"), "-V"]
+    assert main(args) == 0
+    assert "inputs=1" in caplog.text
+    assert "geocoding disabled" in caplog.text
+    assert "batch summary: 1 succeeded" in caplog.text
+
+
+def test_default_logging_stays_at_info(monkeypatch, make_jpeg, tmp_path, analysis, caplog):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", lambda *args: analysis)
+    output = tmp_path / "out.yaml"
+    args = [str(make_jpeg()), "-o", str(output), "--geonames-db", str(tmp_path / "missing.db")]
+    assert main(args) == 0
+    assert "inputs=1" not in caplog.text
