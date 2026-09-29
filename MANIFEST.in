@@ -1,4 +1,3 @@
-include LENZCONTEXT_SPEC.md
 include .env.sample
-include geonames_download.sh
+include geonames_setup.sh
 recursive-include tests *.py

@@ -32,16 +32,21 @@ into `data/geonames-src/`:
 - `admin2Codes.txt`
 - `countryInfo.txt`
 
-For example, the existing `bash geonames_download.sh` helper downloads these files
-and extracts the ZIPs (requires `curl` and `unzip`). The importer also reads ZIP
-members directly, so extraction is optional. When both are present it uses the
-extracted `.txt`; keep extracted files in sync when refreshing the downloads.
+Run `bash geonames_setup.sh` to download the files, extract the ZIPs, and build
+the default database at `data/geonames.db` (requires `curl` and `unzip`). The
+script expects the project environment to be active. It stops if a download,
+extraction, or import fails. It will not replace an existing database; remove it
+manually only if you intend to rebuild it. To keep the current database and build
+to another path, pass the output file as an argument:
 
 ```bash
-python -m lenzcontext.geonames.importer data/geonames-src
-# Optional destination or explicit replacement:
+bash geonames_setup.sh /tmp/geonames-test.db
+```
+
+If the dump files are already present, run the importer directly:
+
+```bash
 python -m lenzcontext.geonames.importer data/geonames-src -o data/custom.db
-python -m lenzcontext.geonames.importer data/geonames-src --overwrite
 ```
 
 The default database is `data/geonames.db`. A full import needs several GB of disk
@@ -363,6 +368,11 @@ README.md
 ```
 
 ## GeoNames attribution
+
+The LenzContext application source code is licensed under the MIT License; see
+[`LICENSE`](LICENSE). This license applies to the application code and its
+documentation. GeoNames datasets are separate, are not included in this repository,
+and remain subject to their own attribution terms.
 
 Geographic data is provided by [GeoNames](https://www.geonames.org/), licensed under
 [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
