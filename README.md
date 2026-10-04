@@ -300,8 +300,8 @@ are preserved. Whitespace-only text becomes empty; `detected: true` with empty
 text remains a validation error. This normalization applies to the stored OCR
 value, not YAML formatting or the raw model response shown in verbose logs.
 
-PyYAML writes Unicode directly. File names are base names; paths are not
-included. Each complete record is rendered in memory and written to the same
+PyYAML writes Unicode directly. `file.name` preserves the input path exactly as
+passed on the command line, including directory components. Each complete record is rendered in memory and written to the same
 output file, then closed so it appears in `tail`. If the process is forcibly
 stopped during a write, the last record may be incomplete. The output directory
 must already exist.

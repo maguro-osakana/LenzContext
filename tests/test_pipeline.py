@@ -17,7 +17,7 @@ def test_order_mixed_batch_and_failure_recovery(make_jpeg, tmp_path, analysis, c
     analyzer = Mock()
     analyzer.analyze.side_effect = [analysis, analysis, LLMError("LLM API returned HTTP 500"), analysis]
     batch = process_batch(paths, Pipeline(analyzer))
-    assert [r.file.name for r in batch.images] == ["C.jpg", "A.JPG", "B.JPEG"]
+    assert [r.file.name for r in batch.images] == [str(paths[i]) for i in (0, 2, 4)]
     assert "skipping non-JPEG file:" in caplog.text
     assert "500" in caplog.text
     assert analyzer.analyze.call_count == 4
@@ -57,6 +57,20 @@ def test_cli_success_and_empty_batch(monkeypatch, make_jpeg, tmp_path, analysis)
     assert "description_en:" in before
     assert main([str(tmp_path / "x.png"), "-o", str(output)]) == 1
     assert output.read_text() == before
+
+
+@pytest.mark.parametrize("input_path", ["photos/image.jpg", "./photos/image.jpg", "photos//image.jpg", "photos/../photos/image.jpg"])
+def test_cli_preserves_input_path(monkeypatch, make_jpeg, tmp_path, analysis, input_path):
+    image = make_jpeg()
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "image.jpg").write_bytes(image.read_bytes())
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
+    monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", lambda *args: analysis)
+    output = tmp_path / "out.yaml"
+    assert main([input_path, "-o", str(output)]) == 0
+    assert yaml.safe_load(output.read_text())["images"][0]["file"]["name"] == input_path
 
 
 def test_output_cannot_overwrite_input(monkeypatch, make_jpeg):
@@ -117,13 +131,13 @@ def test_cli_writes_each_success_before_next_image(monkeypatch, make_jpeg, tmp_p
     def analyze(*args):
         calls.append(1)
         if len(calls) == 2:
-            assert [row["file"]["name"] for row in yaml.safe_load(output.read_text())["images"]] == ["one.jpg"]
+            assert [row["file"]["name"] for row in yaml.safe_load(output.read_text())["images"]] == [str(paths[0])]
         return analysis
 
     monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", analyze)
     assert main([*(str(p) for p in paths), "-o", str(output),
                  "--geonames-db", str(tmp_path / "missing.db")]) == 0
-    assert [row["file"]["name"] for row in yaml.safe_load(output.read_text())["images"]] == ["one.jpg", "two.jpg"]
+    assert [row["file"]["name"] for row in yaml.safe_load(output.read_text())["images"]] == [str(p) for p in paths]
 
 
 def test_cli_append_and_empty_batch(monkeypatch, make_jpeg, tmp_path, analysis):
@@ -177,7 +191,7 @@ def test_cli_write_error_stops_batch_and_keeps_completed_records(monkeypatch, ma
     paths = [make_jpeg(f"{i}.jpg") for i in range(3)]
     output = tmp_path / "result.yaml"
     assert main([*(str(p) for p in paths), "-o", str(output)]) == 1
-    assert [item["file"]["name"] for item in yaml.safe_load(output.read_text())["images"]] == ["0.jpg"]
+    assert [item["file"]["name"] for item in yaml.safe_load(output.read_text())["images"]] == [str(paths[0])]
     assert analyze.call_count == 2
 
 

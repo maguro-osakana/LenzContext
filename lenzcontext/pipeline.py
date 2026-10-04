@@ -21,7 +21,9 @@ class Pipeline:
         self.analyzer = analyzer
         self.geocoder = geocoder
 
-    def process(self, path: Path) -> ImageResult:
+    def process(self, path: Path | str) -> ImageResult:
+        input_name = str(path)
+        path = Path(path)
         jpeg, exif = read_jpeg(path)
         address = None
         if self.geocoder is None:
@@ -38,4 +40,4 @@ class Pipeline:
         analysis = self.analyzer.analyze(jpeg, address, exif.taken_at)
         LOG.debug("%s: analysis accepted (description=%d chars, ocr_detected=%s, screenshot_probability=%s)",
                   path, len(analysis.description_en), analysis.ocr.detected, analysis.screenshot_probability)
-        return ImageResult(file=FileInfo(name=path.name), exif=exif, address=address, analysis=analysis)
+        return ImageResult(file=FileInfo(name=input_name), exif=exif, address=address, analysis=analysis)

@@ -21,12 +21,12 @@ from .pipeline import Pipeline
 LOG = logging.getLogger(__name__)
 
 
-def process_batch(paths: list[Path], pipeline: Pipeline,
+def process_batch(paths: list[Path | str], pipeline: Pipeline,
                   on_success: Callable[[ImageResult], None] | None = None) -> BatchResult:
     images = []
     skipped = failed = 0
     for path in paths:
-        if not is_jpeg_path(path):
+        if not is_jpeg_path(Path(path)):
             LOG.warning("skipping non-JPEG file: %s", path)
             skipped += 1
             continue
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lenzcontext", description="Analyze JPEG images into one YAML file.")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("-V", "--verbose", action="store_true", help="enable DEBUG diagnostics on stderr")
-    parser.add_argument("images", nargs="+", type=Path)
+    parser.add_argument("images", nargs="+")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("-o", "--output", type=Path, help="output YAML file (default: lenzcontext.yaml)")
     output_group.add_argument("-a", "--append", type=Path, metavar="FILE", help="append records to an existing YAML file")
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
               len(args.images), settings.geonames_db, settings.prompt_config or "<auto>",
               destination, settings.structured_output, settings.timeout, settings.retries,
               settings.description_language)
-    if any(destination.resolve() == image.resolve() for image in args.images):
+    if any(destination.resolve() == Path(image).resolve() for image in args.images):
         LOG.error("output must not overwrite an input image")
         return 2
     if destination.resolve() == settings.geonames_db.resolve():
