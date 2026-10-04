@@ -98,6 +98,7 @@ class Settings:
     geonames_db: Path = Path("data/geonames.db")
     prompt_config: Path | None = None
     description_language: str = "English"
+    jobs: int = 1
 
     def __post_init__(self) -> None:
         try:
@@ -117,6 +118,8 @@ class Settings:
             raise ConfigError("API timeout must be positive and finite")
         if type(self.retries) is not int or self.retries < 0:
             raise ConfigError("retries must be a non-negative integer")
+        if type(self.jobs) is not int or self.jobs < 1:
+            raise ConfigError("jobs must be a positive integer")
         if not self.description_language.strip() or any(char in self.description_language for char in "\r\n"):
             raise ConfigError("description language must be a nonempty single-line language name")
         if "\r" in self.api_key or "\n" in self.api_key:
@@ -133,7 +136,7 @@ class Settings:
     def from_env(cls, *, structured_output: bool = False, timeout: float | None = None,
                  retries: int | None = None, geonames_db: Path | None = None,
                  prompt_config: Path | None = None,
-                 description_language: str | None = None) -> "Settings":
+                 description_language: str | None = None, jobs: int | None = None) -> "Settings":
         try:
             values = {
                 key: value for key, value in dotenv_values(
@@ -156,6 +159,11 @@ class Settings:
                 retries = int(values.get("LENZCONTEXT_RETRIES", "5"))
             except ValueError:
                 raise ConfigError("LENZCONTEXT_RETRIES must be a non-negative integer") from None
+        if jobs is None:
+            try:
+                jobs = int(values.get("LENZCONTEXT_JOBS", "1"))
+            except ValueError:
+                raise ConfigError("LENZCONTEXT_JOBS must be a positive integer") from None
 
         def configured_path(override: Path | None, key: str, default: str | None) -> Path | None:
             if override is not None:
@@ -173,6 +181,7 @@ class Settings:
             model=values.get("LENZCONTEXT_MODEL", ""),
             timeout=timeout,
             retries=retries,
+            jobs=jobs,
             structured_output=structured_output,
             geonames_db=configured_path(geonames_db, "LENZCONTEXT_GEONAMES_DB", "data/geonames.db"),
             prompt_config=configured_path(prompt_config, "LENZCONTEXT_PROMPT_CONFIG", None),

@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from http.client import HTTPException
 from itertools import count
+from threading import Event
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -16,7 +17,7 @@ from pydantic import ValidationError
 
 from ..config import Prompts, Settings
 from ..models import Address, AnalysisResult
-from .base import LLMError
+from .base import AnalysisCancelled, LLMError
 
 LOG = logging.getLogger(__name__)
 Transport = Callable[[str, dict[str, Any], dict[str, str], float], dict[str, Any]]
@@ -120,13 +121,19 @@ def _redacted_payload(payload: dict[str, Any], image_size: int, digest: str) -> 
 
 class OpenAICompatibleAnalyzer:
     def __init__(self, settings: Settings, prompts: Prompts, transport: Transport = send_json,
-                 *, description_language: str = "English"):
+                 *, description_language: str = "English", stop_event: Event | None = None):
         self.settings = settings
         self.prompts = prompts
         self.transport = transport
         self.description_language = description_language
+        self.stop_event = stop_event
+
+    def _check_cancelled(self) -> None:
+        if self.stop_event is not None and self.stop_event.is_set():
+            raise AnalysisCancelled("LLM analysis cancelled")
 
     def analyze(self, jpeg: bytes, address: Address | None, taken_at: str | None) -> AnalysisResult:
+        self._check_cancelled()
         system, user = self.prompts.render(address, taken_at, self.description_language)
         payload: dict[str, Any] = {
             "model": self.settings.model,
@@ -162,6 +169,7 @@ class OpenAICompatibleAnalyzer:
         max_attempts = self.settings.retries
         attempts = count(1) if max_attempts == 0 else range(1, max_attempts + 1)
         for attempt in attempts:
+            self._check_cancelled()
             try:
                 LOG.debug("LLM request: attempt=%d reasoning_effort=%s thinking_token_budget=%s",
                           attempt, payload.get("reasoning_effort", "server default"),
@@ -171,8 +179,12 @@ class OpenAICompatibleAnalyzer:
                     response = self.transport(self.settings.completions_url, payload, headers, self.settings.timeout)
                 finally:
                     LOG.debug("LLM request: attempt=%d elapsed=%.2fs", attempt, time.perf_counter() - started)
+                self._check_cancelled()
                 return parse_response(response)
+            except AnalysisCancelled:
+                raise
             except TransportError as exc:
+                self._check_cancelled()
                 if self.prompts.reasoning is not None and exc.status in {400, 404, 415, 422}:
                     raise LLMError(
                         f"LLM API returned HTTP {exc.status} with reasoning controls configured; "
@@ -190,6 +202,7 @@ class OpenAICompatibleAnalyzer:
                             max_attempts or "unlimited",
                             " without structured output" if unsupported else "")
             except LLMError:
+                self._check_cancelled()
                 if max_attempts and attempt >= max_attempts:
                     raise
                 LOG.warning("invalid LLM analysis; retrying after attempt %d/%s", attempt,

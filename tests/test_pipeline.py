@@ -60,7 +60,8 @@ def test_cli_success_and_empty_batch(monkeypatch, make_jpeg, tmp_path, analysis)
 
 
 @pytest.mark.parametrize("input_path", ["photos/image.jpg", "./photos/image.jpg", "photos//image.jpg", "photos/../photos/image.jpg"])
-def test_cli_preserves_input_path(monkeypatch, make_jpeg, tmp_path, analysis, input_path):
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_cli_preserves_input_path(monkeypatch, make_jpeg, tmp_path, analysis, input_path, jobs):
     image = make_jpeg()
     photos = tmp_path / "photos"
     photos.mkdir()
@@ -69,7 +70,7 @@ def test_cli_preserves_input_path(monkeypatch, make_jpeg, tmp_path, analysis, in
     monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
     monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", lambda *args: analysis)
     output = tmp_path / "out.yaml"
-    assert main([input_path, "-o", str(output)]) == 0
+    assert main([input_path, "-o", str(output), "--jobs", str(jobs)]) == 0
     assert yaml.safe_load(output.read_text())["images"][0]["file"]["name"] == input_path
 
 

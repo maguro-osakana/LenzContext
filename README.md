@@ -1,6 +1,6 @@
 # LenzContext
 
-LenzContext analyzes JPEGs in input order and writes their context to **one YAML
+LenzContext analyzes JPEGs and writes their context in input order to **one YAML
 file**. It extracts EXIF capture time and GPS locally, resolves approximate
 addresses with a local GeoNames SQLite database, and asks a configurable vision
 LLM for an English description, a description in the requested language,
@@ -89,11 +89,13 @@ can override an invalid environment value.
 | `LENZCONTEXT_DESCRIPTION_LANGUAGE` | Default for `--description-language` | `English` |
 | `LENZCONTEXT_TIMEOUT` | Default for `--timeout`, in seconds | `120` |
 | `LENZCONTEXT_RETRIES` | Default for `--retries`, maximum requests per image | `5` |
+| `LENZCONTEXT_JOBS` | Default for `-j/--jobs`, maximum simultaneous LLM analyses | `1` |
 
 Paths are relative to the working directory. Leave `LENZCONTEXT_PROMPT_CONFIG`
 unset to retain automatic prompt discovery. Empty path or language values are
 configuration errors. Timeout must be positive and finite; retries must be a
 non-negative integer (`0` retries indefinitely).
+Jobs must be a positive integer; `1` processes images sequentially.
 
 For example, add these defaults to `.env`:
 
@@ -142,6 +144,9 @@ lenzcontext IMG_001.jpg
 # Batch, preserving the exact argument order; PNG is warned about and skipped:
 lenzcontext C.jpg A.JPEG screenshot.png B.jpg -o result.yaml
 
+# Up to four simultaneous LLM analyses, writing results in input order:
+lenzcontext sample/*.jpg --jobs 4 -o result.yaml
+
 # Describe images in Japanese as well as English:
 lenzcontext IMG_001.jpg --description-language Japanese -o result.yaml
 
@@ -170,7 +175,8 @@ take much longer than one timeout period, especially with `--retries 0`.
 When English is selected, the prompt asks the model to make `description`
 identical to `description_en`.
 
-Each successful image is written to the YAML file as soon as it finishes. To
+Each successful image is written to the YAML file as soon as all earlier inputs
+have finished or been skipped. To
 watch an existing output while the batch runs, use `tail -f lenzcontext.yaml`;
 `tail -F lenzcontext.yaml` also waits for the file to appear. When using `-o`
 or the default output, the first success replaces the existing file. With `-a`,
@@ -178,6 +184,24 @@ the first success creates the file if needed or adds a record to an existing
 LenzContext YAML file. Append mode checks the file's format before any image is
 processed; manually edited or malformed files are rejected. Repeated file names
 are appended as separate records.
+
+`-j N` / `--jobs N` controls simultaneous LLM analyses, including retries; it
+defaults to `1`. Set `LENZCONTEXT_JOBS=4` in `.env` for a persistent default,
+or override it per run with `--jobs`. JPEG validation, EXIF extraction, local
+address lookup, and YAML writes run on the calling thread. Images are prepared
+as workers become available, with at most `2 × jobs` inputs running or waiting
+for ordered output. An earlier slow image may delay writing later results;
+when this limit is reached, preparation waits for ordered output to advance.
+Completed records retained in the returned batch still use memory proportional
+to the number of successful images.
+
+Four workers improved batch throughput in the local sample measurements;
+larger values can increase individual-image latency without improving throughput.
+Choose the value for your endpoint. A write failure or Ctrl-C stops new work
+and further retries and cancels tasks that have not started. Already-running
+HTTP requests must finish or time out before shutdown completes. Ctrl-C exits
+with code `130`; records already written remain in the file. Each request
+attempt retains the configured timeout and each image retains its own retry limit.
 
 Shell globs are expanded by the shell; explicit arguments control ordering.
 JPEG extensions are case-insensitive. Pillow verifies that the content actually
@@ -334,6 +358,7 @@ coordinates and OCR text from the image; redact them before sharing.
 - Exit `1`: no successful JPEGs, or writing output failed.
 - Exit `2`: invalid arguments/configuration, invalid append target, or output
   colliding with an input/DB.
+- Exit `130`: processing interrupted with Ctrl-C.
 
 When nothing succeeds, an existing output file is left unchanged and a new one
 is not created. Successful records preserve input order; failed inputs are
@@ -365,14 +390,15 @@ python -m pytest -q
 Tests generate small JPEGs and GeoNames fixtures, mock LLM responses, and require
 neither real API keys nor the full GeoNames dataset. They cover metadata priority,
 hemispheres, JPEG validation, administrative/language resolution, spatial edges,
-prompt validation, JSON validation/retry/fallback, batch recovery, and YAML output.
+prompt validation, JSON validation/retry/fallback, bounded parallel execution,
+ordered output, cancellation, batch recovery, and YAML output.
 
 ## Project layout
 
 ```text
 lenzcontext/
 ├── __init__.py, __main__.py, cli.py
-├── config.py, models.py, exif.py, pipeline.py, output.py
+├── config.py, models.py, exif.py, pipeline.py, batch.py, output.py
 ├── geonames/
 │   └── __init__.py, importer.py, database.py, reverse.py, language.py
 └── llm/

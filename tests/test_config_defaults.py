@@ -10,7 +10,7 @@ from lenzcontext.config import ConfigError, Settings
 def isolated_settings(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     for name in ("API_BASE", "API_KEY", "MODEL", "GEONAMES_DB", "PROMPT_CONFIG",
-                 "DESCRIPTION_LANGUAGE", "TIMEOUT", "RETRIES"):
+                 "DESCRIPTION_LANGUAGE", "TIMEOUT", "RETRIES", "JOBS"):
         monkeypatch.delenv(f"LENZCONTEXT_{name}", raising=False)
     monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
 
