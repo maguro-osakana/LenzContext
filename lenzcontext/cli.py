@@ -18,7 +18,7 @@ from .geonames.reverse import ReverseGeocoder
 from .llm.base import AnalysisCancelled, LLMError
 from .llm.openai_compatible import OpenAICompatibleAnalyzer
 from .models import BatchResult, ImageResult
-from .output import IncrementalYamlWriter, InvalidOutput
+from .output import IncrementalYamlWriter, InvalidOutput, path_key
 from .pipeline import Pipeline
 
 LOG = logging.getLogger(__name__)
@@ -86,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("-o", "--output", type=Path, help="output YAML file (default: lenzcontext.yaml)")
     output_group.add_argument("-a", "--append", type=Path, metavar="FILE", help="append records to an existing YAML file")
+    output_group.add_argument("--resume", type=Path, metavar="FILE",
+                              help="skip images already recorded in FILE and append new results")
     parser.add_argument("--geonames-db", type=Path,
                         help="GeoNames database (LENZCONTEXT_GEONAMES_DB; default: data/geonames.db)")
     parser.add_argument("--prompt-config", type=Path,
@@ -100,7 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-j", "--jobs", type=int, metavar="N",
                         help="maximum concurrent LLM analyses (LENZCONTEXT_JOBS; default: 1)")
     args = parser.parse_args(argv)
-    destination = args.append or args.output or Path("lenzcontext.yaml")
+    base_dir = os.getcwd()
+    destination = args.resume or args.append or args.output or Path("lenzcontext.yaml")
     fmt = "%(levelname)s: %(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
     logging.basicConfig(level=logging.INFO, format=fmt)
     # Pillow dumps raw EXIF tags at DEBUG; keep that out of CLI output.
@@ -136,9 +139,10 @@ def main(argv: list[str] | None = None) -> int:
         LOG.error("configuration error: %s", exc)
         return 2
     try:
-        writer = IncrementalYamlWriter(destination, append=args.append is not None)
+        writer = IncrementalYamlWriter(destination, append=args.append is not None,
+                                       resume_base_dir=base_dir if args.resume is not None else None)
     except InvalidOutput as exc:
-        LOG.error("invalid append target: %s", exc)
+        LOG.error("invalid append/resume target: %s", exc)
         return 2
     except OSError:
         LOG.error("could not inspect output: %s", destination)
@@ -149,6 +153,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         paths = recursive_jpegs(args.images) if args.recursive else args.images
         LOG.debug("JPEG candidates=%d", len(paths))
+        if args.resume is not None:
+            remaining = [path for path in paths if path_key(str(path), base_dir) not in writer.existing_names]
+            skipped = len(paths) - len(remaining)
+            LOG.info("resume: skipped %d existing image records", skipped)
+            paths = remaining
+            if skipped and not paths:
+                return 0
         try:
             database = GeoNamesDatabase(settings.geonames_db)
             geocoder = ReverseGeocoder(database)

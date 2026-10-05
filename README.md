@@ -156,6 +156,9 @@ lenzcontext IMG_001.jpg --description-language Japanese -o result.yaml
 # Add another batch to an existing output file (or create it if absent):
 lenzcontext more/*.jpg -a result.yaml
 
+# Skip images already in an output and append only new analyses:
+lenzcontext -R sample --resume result.yaml --jobs 4
+
 # Custom database, prompts, structured output, timeout, and retries:
 lenzcontext *.jpg --geonames-db data/custom.db \
   --prompt-config config/prompts.yaml --structured-output --timeout 90 \
@@ -170,7 +173,7 @@ lenzcontext IMG_001.jpg -V
 
 The version and verbosity flags differ only by case: `-v/--version` prints the
 version and exits, while `-V/--verbose` enables DEBUG logging for the run.
-`-o FILE` and `-a FILE` are mutually exclusive. Without either, the output is
+`-o FILE`, `-a FILE`, and `--resume FILE` are mutually exclusive. Without them, the output is
 `lenzcontext.yaml`.
 `--timeout` applies to each request attempt. A series of timeouts can therefore
 take much longer than one timeout period, especially with `--retries 0`.
@@ -187,6 +190,20 @@ the first success creates the file if needed or adds a record to an existing
 LenzContext YAML file. Append mode checks the file's format before any image is
 processed; manually edited or malformed files are rejected. Repeated file names
 are appended as separate records.
+
+`--resume FILE` reads the existing generated YAML and skips inputs whose
+`file.name` is already recorded, then appends successful new analyses. A missing
+or empty file is created on the first success. If every input is already recorded,
+the command exits successfully without modifying the file or calling the LLM.
+Both recorded names and inputs are normalized to absolute paths relative to the
+current working directory (not the YAML file's directory). Thus `sample/A.jpg`,
+`./sample/A.jpg`, and an equivalent absolute path match; `..` and repeated path
+separators are normalized. Symbolic links are not resolved. Output names keep
+the original input spelling. The name set is fixed at startup: repeated new
+inputs are still analyzed and appended separately, just as with `-a`.
+Existing YAML is validated one record at a time, retaining only the name set;
+startup time scales with the size of the existing YAML. Malformed or manually
+edited files are rejected before analysis.
 
 `-j N` / `--jobs N` controls simultaneous LLM analyses, including retries; it
 defaults to `1`. Set `LENZCONTEXT_JOBS=4` in `.env` for a persistent default,
@@ -361,9 +378,10 @@ Reasoning and usage are also logged for received responses that fail validation.
 Verbose logs can therefore contain GPS
 coordinates and OCR text from the image; redact them before sharing.
 
-- Exit `0`: at least one successful record was written, even if others failed.
+- Exit `0`: at least one successful record was written, even if others failed,
+  or every input was skipped as already recorded with `--resume`.
 - Exit `1`: no successful JPEGs, or writing output failed.
-- Exit `2`: invalid arguments/configuration, invalid append target, or output
+- Exit `2`: invalid arguments/configuration, invalid append/resume target, or output
   colliding with an input/DB.
 - Exit `130`: processing interrupted with Ctrl-C.
 

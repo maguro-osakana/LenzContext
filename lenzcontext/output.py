@@ -29,10 +29,69 @@ class InvalidOutput(ValueError):
     """An existing output cannot safely receive more image records."""
 
 
+def path_key(name: str, base_dir: str) -> str:
+    """Normalize names against the execution directory, without resolving symlinks."""
+    return os.path.normpath(os.path.join(base_dir, name))
+
+
+def read_existing_names(destination: Path, base_dir: str) -> set[str]:
+    """Validate generated YAML per image, retaining only normalized names."""
+    names: set[str] = set()
+    if not destination.exists() or not destination.stat().st_size:
+        return names
+    try:
+        with destination.open(encoding="utf-8") as stream, destination.open(encoding="utf-8") as canonical:
+            loader = yaml.SafeLoader(stream)
+            try:
+                def expect(event_type, value=None):
+                    event = loader.get_event()
+                    if (not isinstance(event, event_type)
+                            or (value is not None and event.value != value)):
+                        raise InvalidOutput("existing output is not in the generated YAML format")
+
+                def match(text):
+                    if canonical.read(len(text)) != text:
+                        raise InvalidOutput("existing output is not in the generated YAML format")
+
+                expect(yaml.StreamStartEvent)
+                expect(yaml.DocumentStartEvent)
+                expect(yaml.MappingStartEvent)
+                expect(yaml.ScalarEvent, "version")
+                expect(yaml.ScalarEvent, "1")
+                expect(yaml.ScalarEvent, "images")
+                expect(yaml.SequenceStartEvent)
+                if loader.check_event(yaml.SequenceEndEvent):
+                    match("version: 1\nimages: []\n")
+                else:
+                    match("version: 1\nimages:\n")
+                while not loader.check_event(yaml.SequenceEndEvent):
+                    node = loader.compose_node(None, None)
+                    image = ImageResult.model_validate(loader.construct_document(node))
+                    match(_dump({"images": [image.model_dump(mode="json")]}).removeprefix("images:\n"))
+                    names.add(path_key(image.file.name, base_dir))
+                    loader.anchors.clear()
+                expect(yaml.SequenceEndEvent)
+                expect(yaml.MappingEndEvent)
+                expect(yaml.DocumentEndEvent)
+                expect(yaml.StreamEndEvent)
+                if canonical.read(1):
+                    raise InvalidOutput("existing output is not in the generated YAML format")
+            finally:
+                loader.dispose()
+    except (UnicodeError, yaml.YAMLError, ValidationError, ValueError, TypeError) as exc:
+        raise InvalidOutput("existing output is not a valid LenzContext YAML file") from exc
+    return names
+
+
 class IncrementalYamlWriter:
-    def __init__(self, destination: Path, *, append: bool = False):
+    def __init__(self, destination: Path, *, append: bool = False, resume_base_dir: str | None = None):
         self.destination = Path(destination)
         self.started = False
+        self.existing_names: set[str] = set()
+        if resume_base_dir is not None:
+            self.existing_names = read_existing_names(self.destination, resume_base_dir)
+            self.started = bool(self.existing_names)
+            return
         if append and self.destination.exists() and self.destination.stat().st_size:
             try:
                 existing = self.destination.read_text(encoding="utf-8")
