@@ -4,20 +4,17 @@ import argparse
 import logging
 import os
 import sqlite3
-import time
-from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 
 from . import __version__
-from .batch import process_parallel
+from .batch import process_batch
 from .config import ConfigError, Settings, load_prompts
-from .exif import InvalidJPEG, is_jpeg_path
+from .exif import is_jpeg_path
 from .geonames.database import GeoNamesDatabase
 from .geonames.reverse import ReverseGeocoder
-from .llm.base import AnalysisCancelled, LLMError
+from .llm.base import AnalysisCancelled
 from .llm.openai_compatible import OpenAICompatibleAnalyzer
-from .models import BatchResult, ImageResult
 from .output import IncrementalYamlWriter, InvalidOutput, path_key
 from .pipeline import Pipeline
 
@@ -33,47 +30,6 @@ def recursive_jpegs(directories: list[str]) -> list[str]:
                 if is_jpeg_path(path):
                     paths.append(str(path))
     return paths
-
-
-def process_batch(paths: list[Path | str], pipeline: Pipeline,
-                  on_success: Callable[[ImageResult], None] | None = None, *,
-                  jobs: int = 1, stop_event: Event | None = None) -> BatchResult:
-    if type(jobs) is not int or jobs < 1:
-        raise ValueError("jobs must be a positive integer")
-    if jobs > 1:
-        return process_parallel(paths, pipeline, on_success, jobs=jobs, stop_event=stop_event)
-    images = []
-    skipped = failed = 0
-    for path in paths:
-        if stop_event is not None and stop_event.is_set():
-            raise AnalysisCancelled("batch cancelled")
-        if not is_jpeg_path(Path(path)):
-            LOG.warning("skipping non-JPEG file: %s", path)
-            skipped += 1
-            continue
-        started = time.perf_counter()
-        try:
-            image = pipeline.process(path)
-        except AnalysisCancelled:
-            raise
-        except (OSError, InvalidJPEG):
-            LOG.warning("skipping unreadable JPEG: %s", path)
-            skipped += 1
-        except LLMError as exc:
-            LOG.error("analysis failed for %s: %s", path, exc)
-            failed += 1
-        except Exception as exc:
-            # Third-party exception messages may contain requests or credentials.
-            LOG.error("processing failed for %s (%s)", path, type(exc).__name__)
-            failed += 1
-        else:
-            if on_success is not None:
-                on_success(image)
-            images.append(image)
-        finally:
-            LOG.info("processing %s (%.2fs)", path, time.perf_counter() - started)
-    LOG.debug("batch summary: %d succeeded, %d skipped, %d failed", len(images), skipped, failed)
-    return BatchResult(images=images)
 
 
 def main(argv: list[str] | None = None) -> int:

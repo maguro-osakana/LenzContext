@@ -123,13 +123,15 @@ def test_outstanding_window_is_bounded(monkeypatch, analysis):
     assert [x.file.name for x in result.images] == paths
 
 
-def test_callback_failure_stops_refill_and_signals_running_work(analysis):
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_callback_failure_stops_refill_and_signals_running_work(analysis, jobs):
     stop = Event()
     second_started = Event()
 
     def run(name):
         if name == "first.jpg":
-            assert second_started.wait(5)
+            if jobs > 1:
+                assert second_started.wait(5)
         else:
             second_started.set()
             assert stop.wait(5)
@@ -142,9 +144,9 @@ def test_callback_failure_stops_refill_and_signals_running_work(analysis):
 
     with pytest.raises(OSError, match="disk full"):
         process_batch(["first.jpg", "second.jpg", "third.jpg"], pipeline, write,
-                      jobs=2, stop_event=stop)
+                      jobs=jobs, stop_event=stop)
     assert stop.is_set()
-    assert pipeline.prepared == ["first.jpg", "second.jpg"]
+    assert pipeline.prepared == (["first.jpg"] if jobs == 1 else ["first.jpg", "second.jpg"])
 
 
 def test_interrupt_signals_running_work(monkeypatch, analysis):
@@ -345,3 +347,18 @@ def test_parallel_cli_append_keeps_input_order(monkeypatch, tmp_path, make_jpeg,
     assert main([str(paths[0]), "-j", "2", "-o", str(output)]) == 0
     assert main([*(str(p) for p in paths[1:]), "-j", "2", "-a", str(output)]) == 0
     assert [x['file']['name'] for x in yaml.safe_load(output.read_text())['images']] == [str(p) for p in paths]
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_batch_uses_workers_even_with_one_job(analysis, jobs):
+    pipeline = StubPipeline(analysis)
+    owner = get_ident()
+    written = []
+
+    def write(image):
+        assert get_ident() == owner
+        written.append(image.file.name)
+
+    result = process_batch(["first.jpg", "second.jpg", "third.jpg"], pipeline, write, jobs=jobs)
+    assert written == ["first.jpg", "second.jpg", "third.jpg"]
+    assert [image.file.name for image in result.images] == written

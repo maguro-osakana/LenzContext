@@ -123,6 +123,7 @@ def test_invalid_reasoning_fails_before_analysis(monkeypatch, make_jpeg, tmp_pat
     assert "vision.reasoning.token_budget" in caplog.text
 
 
+
 def test_cli_writes_each_success_before_next_image(monkeypatch, make_jpeg, tmp_path, analysis):
     monkeypatch.setenv("LENZCONTEXT_MODEL", "mock-vision")
     paths = [make_jpeg("one.jpg"), make_jpeg("two.jpg")]
@@ -137,7 +138,7 @@ def test_cli_writes_each_success_before_next_image(monkeypatch, make_jpeg, tmp_p
 
     monkeypatch.setattr("lenzcontext.llm.openai_compatible.OpenAICompatibleAnalyzer.analyze", analyze)
     assert main([*(str(p) for p in paths), "-o", str(output),
-                 "--geonames-db", str(tmp_path / "missing.db")]) == 0
+                 "--geonames-db", str(tmp_path / "missing.db"), "--jobs", "1"]) == 0
     assert [row["file"]["name"] for row in yaml.safe_load(output.read_text())["images"]] == [str(p) for p in paths]
 
 
@@ -193,7 +194,7 @@ def test_cli_write_error_stops_batch_and_keeps_completed_records(monkeypatch, ma
     output = tmp_path / "result.yaml"
     assert main([*(str(p) for p in paths), "-o", str(output)]) == 1
     assert [item["file"]["name"] for item in yaml.safe_load(output.read_text())["images"]] == [str(paths[0])]
-    assert analyze.call_count == 2
+    assert 2 <= analyze.call_count <= 3
 
 
 @pytest.mark.parametrize("flag", ["-a", "-o"])

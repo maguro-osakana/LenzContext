@@ -206,7 +206,10 @@ startup time scales with the size of the existing YAML. Malformed or manually
 edited files are rejected before analysis.
 
 `-j N` / `--jobs N` controls simultaneous LLM analyses, including retries; it
-defaults to `1`. Set `LENZCONTEXT_JOBS=4` in `.env` for a persistent default,
+defaults to `1`. All job counts use the same worker-pool implementation, including
+a single worker for `--jobs 1`. Image preparation, address lookup, and YAML writes
+run on the caller thread; LLM analysis runs on workers.
+Set `LENZCONTEXT_JOBS=4` in `.env` for a persistent default,
 or override it per run with `--jobs`. JPEG validation, EXIF extraction, local
 address lookup, and YAML writes run on the calling thread. Images are prepared
 as workers become available, with at most `2 × jobs` inputs running or waiting

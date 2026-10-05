@@ -35,9 +35,9 @@ def _failure(path: Path | str, exc: Exception) -> _Outcome:
     return _Outcome("failed")
 
 
-def process_parallel(paths: list[Path | str], pipeline: Pipeline,
-                     on_success: Callable[[ImageResult], None] | None, *,
-                     jobs: int, stop_event: Event | None = None) -> BatchResult:
+def process_batch(paths: list[Path | str], pipeline: Pipeline,
+                     on_success: Callable[[ImageResult], None] | None = None, *,
+                     jobs: int = 1, stop_event: Event | None = None) -> BatchResult:
     if type(jobs) is not int or jobs < 1:
         raise ValueError("jobs must be a positive integer")
     if not paths:
