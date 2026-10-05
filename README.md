@@ -228,7 +228,8 @@ Four workers improved batch throughput in the local sample measurements;
 larger values can increase individual-image latency without improving throughput.
 Choose the value for your endpoint. A write failure or Ctrl-C stops new work
 and further retries and cancels tasks that have not started. Already-running
-HTTP requests must finish or time out before shutdown completes. Ctrl-C exits
+HTTP requests must finish or time out before shutdown completes. During batch
+processing, Ctrl-C logs a WARNING immediately before waiting for running requests. Ctrl-C exits
 with code `130`; records already written remain in the file. Each request
 attempt retains the configured timeout and each image retains its own retry limit.
 

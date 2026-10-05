@@ -118,6 +118,10 @@ def process_batch(paths: list[Path | str], pipeline: Pipeline,
                 # Drop completed futures, including their results/tracebacks, before refilling.
                 done.clear()
                 del future
+    except KeyboardInterrupt:
+        stop.set()
+        LOG.warning("Ctrl-C received; stopping new work and waiting for running requests")
+        raise
     except BaseException:
         stop.set()
         raise

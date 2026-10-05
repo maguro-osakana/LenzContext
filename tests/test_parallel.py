@@ -149,7 +149,7 @@ def test_callback_failure_stops_refill_and_signals_running_work(analysis, jobs):
     assert pipeline.prepared == (["first.jpg"] if jobs == 1 else ["first.jpg", "second.jpg"])
 
 
-def test_interrupt_signals_running_work(monkeypatch, analysis):
+def test_interrupt_signals_running_work(monkeypatch, analysis, caplog):
     stop = Event()
     started = Event()
 
@@ -164,6 +164,15 @@ def test_interrupt_signals_running_work(monkeypatch, analysis):
         assert started.wait(5)
         raise KeyboardInterrupt
 
+    original_shutdown = parallel.ThreadPoolExecutor.shutdown
+
+    def shutdown(executor, **kwargs):
+        assert stop.is_set()
+        warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+        assert any("Ctrl-C received" in record.getMessage() for record in warnings)
+        return original_shutdown(executor, **kwargs)
+
+    monkeypatch.setattr(parallel.ThreadPoolExecutor, "shutdown", shutdown)
     monkeypatch.setattr(parallel, "wait", interrupt)
     with pytest.raises(KeyboardInterrupt):
         process_batch(["first.jpg", "second.jpg", "third.jpg"], pipeline,
