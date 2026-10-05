@@ -209,8 +209,10 @@ edited files are rejected before analysis.
 defaults to `1`. All job counts use the same worker-pool implementation, including
 a single worker for `--jobs 1`. Image preparation, address lookup, and YAML writes
 run on the caller thread; LLM analysis runs on workers.
-The INFO log `processing FILE (Ns)` reports approximate LLM analysis time,
-including retries, measured inside the worker on success or failure. It excludes
+The INFO log `processing FILE (Ns)` reports worker LLM analysis time (including
+retries) divided by the configured `jobs`, as a rough per-file batch-time estimate.
+For example, 8 seconds of analysis with `--jobs 4` displays `2.00s`. The divisor
+is the configured job count even when fewer workers are active. It excludes
 image preparation, address lookup, output writes, and result collection delays.
 Timing logs appear as workers finish; YAML records remain in input order.
 Set `LENZCONTEXT_JOBS=4` in `.env` for a persistent default,

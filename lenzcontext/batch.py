@@ -59,7 +59,7 @@ def process_batch(paths: list[Path | str], pipeline: Pipeline,
             return pipeline.analyze(prepared)
         finally:
             LOG.info("processing %s (%.2fs)", prepared.input_name,
-                     time.perf_counter() - started)
+                     (time.perf_counter() - started) / jobs)
 
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lenzcontext")
     try:

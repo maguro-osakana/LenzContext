@@ -366,10 +366,11 @@ def test_batch_uses_workers_even_with_one_job(analysis, jobs):
 
 @pytest.mark.parametrize("jobs", [1, 4])
 @pytest.mark.parametrize("fails", [False, True])
-def test_analysis_timing_excludes_preparation_collection_and_writes(monkeypatch, analysis, caplog, jobs, fails):
+def test_analysis_timing_divides_by_jobs_and_excludes_other_work(monkeypatch, analysis, caplog, jobs, fails):
     from types import SimpleNamespace
     import logging
 
+    expected_timing = f"processing first.jpg ({3.0 / jobs:.2f}s)"
     clock = [0.0]
     monkeypatch.setattr(parallel, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
     caplog.set_level(logging.INFO, logger="lenzcontext.batch")
@@ -391,7 +392,7 @@ def test_analysis_timing_excludes_preparation_collection_and_writes(monkeypatch,
 
     def delayed_collection(*args, **kwargs):
         result = original_wait(*args, **kwargs)
-        assert "processing first.jpg (3.00s)" in caplog.text
+        assert expected_timing in caplog.text
         clock[0] = 999.0
         return result
 
@@ -402,5 +403,5 @@ def test_analysis_timing_excludes_preparation_collection_and_writes(monkeypatch,
 
     result = process_batch(["first.jpg", "broken.jpg", "skip.png"], pipeline, write, jobs=jobs)
     timings = [r.getMessage() for r in caplog.records if r.getMessage().startswith("processing ")]
-    assert timings == ["processing first.jpg (3.00s)"]
+    assert timings == [expected_timing]
     assert len(result.images) == (0 if fails else 1)
