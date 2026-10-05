@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 import sqlite3
 import time
 from collections.abc import Callable
@@ -21,6 +22,17 @@ from .output import IncrementalYamlWriter, InvalidOutput
 from .pipeline import Pipeline
 
 LOG = logging.getLogger(__name__)
+
+
+def recursive_jpegs(directories: list[str]) -> list[str]:
+    paths = []
+    for directory in directories:
+        for parent, _, names in os.walk(directory, followlinks=True):
+            for name in names:
+                path = Path(parent) / name
+                if is_jpeg_path(path):
+                    paths.append(str(path))
+    return paths
 
 
 def process_batch(paths: list[Path | str], pipeline: Pipeline,
@@ -68,7 +80,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lenzcontext", description="Analyze JPEG images into one YAML file.")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("-V", "--verbose", action="store_true", help="enable DEBUG diagnostics on stderr")
-    parser.add_argument("images", nargs="+")
+    parser.add_argument("images", nargs="+", help="JPEG files, or directories with -R")
+    parser.add_argument("-R", "--recursive", action="store_true",
+                        help="recursively find JPEG files in input directories, following symbolic links")
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument("-o", "--output", type=Path, help="output YAML file (default: lenzcontext.yaml)")
     output_group.add_argument("-a", "--append", type=Path, metavar="FILE", help="append records to an existing YAML file")
@@ -133,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     geocoder = None
     stop_event = Event()
     try:
+        paths = recursive_jpegs(args.images) if args.recursive else args.images
+        LOG.debug("JPEG candidates=%d", len(paths))
         try:
             database = GeoNamesDatabase(settings.geonames_db)
             geocoder = ReverseGeocoder(database)
@@ -143,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             stop_event=stop_event), geocoder)
         LOG.info("LLM concurrency: %d", settings.jobs)
         try:
-            batch = process_batch(args.images, pipeline, on_success=writer.write,
+            batch = process_batch(paths, pipeline, on_success=writer.write,
                                   jobs=settings.jobs, stop_event=stop_event)
         except OSError:
             stop_event.set()

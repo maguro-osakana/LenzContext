@@ -147,6 +147,9 @@ lenzcontext C.jpg A.JPEG screenshot.png B.jpg -o result.yaml
 # Up to four simultaneous LLM analyses, writing results in input order:
 lenzcontext sample/*.jpg --jobs 4 -o result.yaml
 
+# Recursively process JPEGs in directories with four simultaneous analyses:
+lenzcontext -R sample --jobs 4 -o result.yaml
+
 # Describe images in Japanese as well as English:
 lenzcontext IMG_001.jpg --description-language Japanese -o result.yaml
 
@@ -204,6 +207,10 @@ with code `130`; records already written remain in the file. Each request
 attempt retains the configured timeout and each image retains its own retry limit.
 
 Shell globs are expanded by the shell; explicit arguments control ordering.
+With `-R` / `--recursive`, arguments are directories. All `.jpg` and `.jpeg`
+files inside them are collected recursively, including through symbolic links,
+in directory traversal order. Multiple directories can be supplied; file and
+directory arguments are not mixed in this mode.
 JPEG extensions are case-insensitive. Pillow verifies that the content actually
 decodes as JPEG, including rejecting PNG content renamed to `.jpg`. Images are
 never resized, rotated, cropped, re-encoded, enhanced, or converted before sending.
