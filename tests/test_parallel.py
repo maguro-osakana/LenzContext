@@ -109,7 +109,7 @@ def test_outstanding_window_is_bounded(monkeypatch, analysis):
 
     def wait(futures, **kwargs):
         nonlocal observed_window
-        if len(pipeline.prepared) >= 4 and len(futures) == 1:
+        if not observed_window and len(pipeline.prepared) >= 4 and len(futures) == 1:
             # Only the first slow image remains. The other window slots are completed results.
             release.set()
             assert len(pipeline.prepared) == 4
@@ -362,3 +362,45 @@ def test_batch_uses_workers_even_with_one_job(analysis, jobs):
     result = process_batch(["first.jpg", "second.jpg", "third.jpg"], pipeline, write, jobs=jobs)
     assert written == ["first.jpg", "second.jpg", "third.jpg"]
     assert [image.file.name for image in result.images] == written
+
+
+@pytest.mark.parametrize("jobs", [1, 4])
+@pytest.mark.parametrize("fails", [False, True])
+def test_analysis_timing_excludes_preparation_collection_and_writes(monkeypatch, analysis, caplog, jobs, fails):
+    from types import SimpleNamespace
+    import logging
+
+    clock = [0.0]
+    monkeypatch.setattr(parallel, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
+    caplog.set_level(logging.INFO, logger="lenzcontext.batch")
+
+    def run(name):
+        clock[0] = 103.0
+        if fails:
+            raise LLMError("analysis failed")
+
+    pipeline = StubPipeline(analysis, run)
+    original_prepare = pipeline.prepare
+
+    def prepare(path):
+        clock[0] = 100.0
+        return original_prepare(path)
+
+    pipeline.prepare = prepare
+    original_wait = parallel.wait
+
+    def delayed_collection(*args, **kwargs):
+        result = original_wait(*args, **kwargs)
+        assert "processing first.jpg (3.00s)" in caplog.text
+        clock[0] = 999.0
+        return result
+
+    monkeypatch.setattr(parallel, "wait", delayed_collection)
+
+    def write(image):
+        clock[0] = 2000.0
+
+    result = process_batch(["first.jpg", "broken.jpg", "skip.png"], pipeline, write, jobs=jobs)
+    timings = [r.getMessage() for r in caplog.records if r.getMessage().startswith("processing ")]
+    assert timings == ["processing first.jpg (3.00s)"]
+    assert len(result.images) == (0 if fails else 1)

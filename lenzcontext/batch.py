@@ -36,8 +36,8 @@ def _failure(path: Path | str, exc: Exception) -> _Outcome:
 
 
 def process_batch(paths: list[Path | str], pipeline: Pipeline,
-                     on_success: Callable[[ImageResult], None] | None = None, *,
-                     jobs: int = 1, stop_event: Event | None = None) -> BatchResult:
+                  on_success: Callable[[ImageResult], None] | None = None, *,
+                  jobs: int = 1, stop_event: Event | None = None) -> BatchResult:
     if type(jobs) is not int or jobs < 1:
         raise ValueError("jobs must be a positive integer")
     if not paths:
@@ -46,7 +46,7 @@ def process_batch(paths: list[Path | str], pipeline: Pipeline,
     stop = stop_event if stop_event is not None else Event()
     workers = min(jobs, len(paths))
     window = 2 * workers
-    pending: dict[Future[ImageResult], tuple[int, float]] = {}
+    pending: dict[Future[ImageResult], int] = {}
     ready: dict[int, _Outcome] = {}
     images = []
     next_input = next_output = skipped = failed = 0
@@ -54,7 +54,12 @@ def process_batch(paths: list[Path | str], pipeline: Pipeline,
     def analyze(prepared: PreparedImage) -> ImageResult:
         if stop.is_set():
             raise AnalysisCancelled("batch cancelled")
-        return pipeline.analyze(prepared)
+        started = time.perf_counter()
+        try:
+            return pipeline.analyze(prepared)
+        finally:
+            LOG.info("processing %s (%.2fs)", prepared.input_name,
+                     time.perf_counter() - started)
 
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lenzcontext")
     try:
@@ -87,17 +92,15 @@ def process_batch(paths: list[Path | str], pipeline: Pipeline,
                     LOG.warning("skipping non-JPEG file: %s", path)
                     ready[index] = _Outcome("skipped")
                     continue
-                started = time.perf_counter()
                 try:
                     prepared = pipeline.prepare(path)
                 except AnalysisCancelled:
                     raise
                 except Exception as exc:
                     ready[index] = _failure(path, exc)
-                    LOG.info("processing %s (%.2fs)", path, time.perf_counter() - started)
                 else:
                     future = executor.submit(analyze, prepared)
-                    pending[future] = (index, started)
+                    pending[future] = index
                     del prepared
 
             if next_output in ready:
@@ -105,15 +108,13 @@ def process_batch(paths: list[Path | str], pipeline: Pipeline,
             if pending:
                 done, _ = wait(pending, return_when=FIRST_COMPLETED)
                 for future in done:
-                    index, started = pending.pop(future)
+                    index = pending.pop(future)
                     try:
                         ready[index] = _Outcome("success", future.result())
                     except AnalysisCancelled:
                         raise
                     except Exception as exc:
                         ready[index] = _failure(paths[index], exc)
-                    finally:
-                        LOG.info("processing %s (%.2fs)", paths[index], time.perf_counter() - started)
                 # Drop completed futures, including their results/tracebacks, before refilling.
                 done.clear()
                 del future
