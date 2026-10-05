@@ -167,7 +167,7 @@ lenzcontext *.jpg --geonames-db data/custom.db \
 # Print the version (-v):
 lenzcontext -v
 
-# DEBUG diagnostics on stderr (-V):
+# DEBUG diagnostics on stdout (-V):
 lenzcontext IMG_001.jpg -V
 ```
 
@@ -363,7 +363,7 @@ must already exist.
 
 ## Errors and logging
 
-Logs go to stderr; results go only to the YAML file. Non-JPEG and unreadable inputs
+All console messages, including logs and argument errors, go to stdout; results go only to the YAML file. Non-JPEG and unreadable inputs
 are warned about and skipped. Missing EXIF, GPS, capture time, or an address is
 normal. An unavailable database produces a warning and analysis continues without
 addresses. API failures are reported per image and remaining inputs continue.

@@ -1,14 +1,15 @@
 """Ordered batch CLI; individual failures never discard successful records."""
 
-import argparse
 import logging
 import os
 import sqlite3
+import sys
 from pathlib import Path
 from threading import Event
 
 from . import __version__
 from .batch import process_batch
+from .console import ArgumentParser
 from .config import ConfigError, Settings, load_prompts
 from .exif import is_jpeg_path
 from .geonames.database import GeoNamesDatabase
@@ -33,9 +34,9 @@ def recursive_jpegs(directories: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="lenzcontext", description="Analyze JPEG images into one YAML file.")
+    parser = ArgumentParser(prog="lenzcontext", description="Analyze JPEG images into one YAML file.")
     parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("-V", "--verbose", action="store_true", help="enable DEBUG diagnostics on stderr")
+    parser.add_argument("-V", "--verbose", action="store_true", help="enable DEBUG diagnostics on stdout")
     parser.add_argument("images", nargs="+", help="JPEG files, or directories with -R")
     parser.add_argument("-R", "--recursive", action="store_true",
                         help="recursively find JPEG files in input directories, following symbolic links")
@@ -61,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     base_dir = os.getcwd()
     destination = args.resume or args.append or args.output or Path("lenzcontext.yaml")
     fmt = "%(levelname)s: %(name)s: %(message)s" if args.verbose else "%(levelname)s: %(message)s"
-    logging.basicConfig(level=logging.INFO, format=fmt)
+    logging.basicConfig(level=logging.INFO, format=fmt, stream=sys.stdout)
     # Pillow dumps raw EXIF tags at DEBUG; keep that out of CLI output.
     logging.getLogger("PIL").setLevel(logging.WARNING)
     if args.verbose:

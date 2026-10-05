@@ -1,9 +1,9 @@
 """Stream GeoNames dumps into an atomically published SQLite database."""
 
-import argparse
 import logging
 import os
 import sqlite3
+import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -11,6 +11,8 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import TextIO
 from zipfile import BadZipFile, ZipFile
+
+from ..console import ArgumentParser
 
 LOG = logging.getLogger(__name__)
 
@@ -145,12 +147,12 @@ def import_database(source: Path, destination: Path, *, overwrite: bool = False)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="directory containing GeoNames dumps or ZIPs")
     parser.add_argument("-o", "--output", type=Path, default=Path("data/geonames.db"))
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", stream=sys.stdout)
     try:
         import_database(args.source, args.output, overwrite=args.overwrite)
     except (OSError, ValueError, sqlite3.Error, KeyError, BadZipFile) as exc:
