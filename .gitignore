@@ -22,3 +22,4 @@ dist/
 
 # macOS metadata
 .DS_Store
+experiments/
