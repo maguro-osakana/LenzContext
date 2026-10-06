@@ -90,8 +90,9 @@ def read_jpeg(path: Path) -> tuple[bytes, ExifInfo]:
     data = path.read_bytes()
     try:
         with Image.open(io.BytesIO(data)) as image:
-            if image.format != "JPEG":
-                raise InvalidJPEG("file content is not JPEG")
+            if image.format not in {"JPEG", "MPO"}:
+                raise InvalidJPEG("file content is not JPEG or MPO")
+            image.seek(0)  # Validate and read metadata from the primary image.
             image.load()
             tags: dict[int, Any] = {}
             gps: Mapping[int, Any] = {}

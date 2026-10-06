@@ -60,3 +60,42 @@ def test_invalid_or_incomplete_gps_is_absent():
     for gps in ({}, {1: "N", 2: (1, 2, 3)}, {1: "N", 2: (999, 0, 0), 3: "E", 4: (1, 0, 0)}):
         info = parse_exif({}, gps)
         assert info.latitude is info.longitude is None
+
+
+def test_mpo_primary_metadata_and_original_payload(tmp_path, analysis):
+    import base64
+    import io
+
+    from lenzcontext.config import Prompts, Settings
+    from lenzcontext.llm.openai_compatible import OpenAICompatibleAnalyzer
+    from lenzcontext.pipeline import Pipeline
+
+    path = tmp_path / 'photo.JPG'
+    exif = Image.Exif()
+    exif[306] = '2012:04:27 07:51:52'
+    Image.new('RGB', (32, 24), 'red').save(
+        path, format='MPO', save_all=True,
+        append_images=[Image.new('RGB', (8, 6), 'blue')], exif=exif,
+    )
+    original = path.read_bytes()
+    with Image.open(io.BytesIO(original)) as image:
+        assert image.format == 'MPO'
+        assert image.n_frames == 2
+        assert image.size == (32, 24)
+    data, metadata = read_jpeg(path)
+    assert data == original
+    assert metadata.taken_at == '2012-04-27T07:51:52'
+
+    def transport(url, payload, headers, timeout):
+        image_url = payload['messages'][1]['content'][1]['image_url']['url']
+        assert base64.b64decode(image_url.split(',', 1)[1]) == original
+        return {'choices': [{'message': {'content': analysis.model_dump_json()}}]}
+
+    analyzer = OpenAICompatibleAnalyzer(
+        Settings(api_base='http://localhost', model='mock'),
+        Prompts(system='Analyze image', user='${taken_at}'), transport,
+    )
+    result = Pipeline(analyzer).process(path)
+    assert result.exif == metadata
+    assert result.analysis == analysis
+    assert path.read_bytes() == original

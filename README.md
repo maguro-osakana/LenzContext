@@ -22,6 +22,10 @@ python -m pip install -e '.[test]'
 Both `lenzcontext` and `python -m lenzcontext` run the CLI. There is no hardcoded
 model choice and no real API call is needed to install or run tests.
 
+MPO content in `.jpg` / `.jpeg` files is also accepted. The first (primary) image
+is used for local decoding and EXIF extraction. The complete original file bytes,
+including secondary images, are sent unchanged to the LLM.
+
 ## GeoNames dataset setup
 
 `curl`, `unzip`, and the project environment are required to download and prepare
