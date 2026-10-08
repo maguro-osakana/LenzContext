@@ -34,53 +34,85 @@ def path_key(name: str, base_dir: str) -> str:
     return os.path.normpath(os.path.join(base_dir, name))
 
 
-def read_existing_names(destination: Path, base_dir: str) -> set[str]:
-    """Validate generated YAML per image, retaining only normalized names."""
-    names: set[str] = set()
-    if not destination.exists() or not destination.stat().st_size:
-        return names
+def _existing_images(destination: Path):
+    """Read one document without retaining the entire images sequence."""
     try:
-        with destination.open(encoding="utf-8") as stream, destination.open(encoding="utf-8") as canonical:
+        with destination.open(encoding="utf-8-sig") as stream:
             loader = yaml.SafeLoader(stream)
             try:
-                def expect(event_type, value=None):
-                    event = loader.get_event()
-                    if (not isinstance(event, event_type)
-                            or (value is not None and event.value != value)):
-                        raise InvalidOutput("existing output is not in the generated YAML format")
+                def expect(event_type):
+                    if not isinstance(loader.get_event(), event_type):
+                        raise InvalidOutput("unexpected YAML structure")
 
-                def match(text):
-                    if canonical.read(len(text)) != text:
-                        raise InvalidOutput("existing output is not in the generated YAML format")
+                def value():
+                    node = loader.compose_node(None, None)
+                    result = loader.construct_document(node)
+                    loader.anchors.clear()
+                    return result
 
                 expect(yaml.StreamStartEvent)
                 expect(yaml.DocumentStartEvent)
                 expect(yaml.MappingStartEvent)
-                expect(yaml.ScalarEvent, "version")
-                expect(yaml.ScalarEvent, "1")
-                expect(yaml.ScalarEvent, "images")
-                expect(yaml.SequenceStartEvent)
-                if loader.check_event(yaml.SequenceEndEvent):
-                    match("version: 1\nimages: []\n")
-                else:
-                    match("version: 1\nimages:\n")
-                while not loader.check_event(yaml.SequenceEndEvent):
-                    node = loader.compose_node(None, None)
-                    image = ImageResult.model_validate(loader.construct_document(node))
-                    match(_dump({"images": [image.model_dump(mode="json")]}).removeprefix("images:\n"))
-                    names.add(path_key(image.file.name, base_dir))
-                    loader.anchors.clear()
-                expect(yaml.SequenceEndEvent)
+                seen = set()
+                while not loader.check_event(yaml.MappingEndEvent):
+                    expect_key = loader.peek_event()
+                    if not isinstance(expect_key, yaml.ScalarEvent):
+                        raise InvalidOutput("expected version or images")
+                    key = value()
+                    if not isinstance(key, str) or key not in {"version", "images"} or key in seen:
+                        raise InvalidOutput("expected unique version and images fields")
+                    seen.add(key)
+                    if key == "version":
+                        BatchResult.model_validate({"version": value(), "images": []})
+                    else:
+                        expect(yaml.SequenceStartEvent)
+                        while not loader.check_event(yaml.SequenceEndEvent):
+                            yield ImageResult.model_validate(value())
+                        expect(yaml.SequenceEndEvent)
+                if seen != {"version", "images"}:
+                    raise InvalidOutput("existing output must contain version and images")
                 expect(yaml.MappingEndEvent)
                 expect(yaml.DocumentEndEvent)
                 expect(yaml.StreamEndEvent)
-                if canonical.read(1):
-                    raise InvalidOutput("existing output is not in the generated YAML format")
             finally:
                 loader.dispose()
     except (UnicodeError, yaml.YAMLError, ValidationError, ValueError, TypeError) as exc:
         raise InvalidOutput("existing output is not a valid LenzContext YAML file") from exc
-    return names
+
+
+def read_existing_names(destination: Path, base_dir: str) -> set[str]:
+    if not destination.exists() or not destination.stat().st_size:
+        return set()
+    return {path_key(image.file.name, base_dir) for image in _existing_images(destination)}
+
+
+def _normalize_existing(destination: Path, base_dir: str | None) -> tuple[set[str], bool]:
+    """Replace the original only after the complete document validates."""
+    names: set[str] = set()
+    populated = False
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=destination.parent,
+            prefix=f".{destination.name}.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write("version: 1\nimages:\n")
+            for image in _existing_images(destination):
+                stream.write(_dump({"images": [image.model_dump(mode="json")]}).removeprefix("images:\n"))
+                populated = True
+                if base_dir is not None:
+                    names.add(path_key(image.file.name, base_dir))
+            if not populated:
+                stream.seek(0)
+                stream.truncate()
+                stream.write("version: 1\nimages: []\n")
+        os.chmod(temporary, destination.stat().st_mode & 0o777)
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return names, populated
 
 
 class IncrementalYamlWriter:
@@ -88,22 +120,8 @@ class IncrementalYamlWriter:
         self.destination = Path(destination)
         self.started = False
         self.existing_names: set[str] = set()
-        if resume_base_dir is not None:
-            self.existing_names = read_existing_names(self.destination, resume_base_dir)
-            self.started = bool(self.existing_names)
-            return
-        if append and self.destination.exists() and self.destination.stat().st_size:
-            try:
-                existing = self.destination.read_text(encoding="utf-8")
-                data = yaml.safe_load(existing)
-                if not isinstance(data, dict) or set(data) != {"version", "images"}:
-                    raise InvalidOutput("existing output must contain version and images")
-                batch = BatchResult.model_validate(data)
-                if existing != _dump(batch.model_dump(mode="json")):
-                    raise InvalidOutput("existing output is not in the generated YAML format")
-            except (UnicodeError, yaml.YAMLError, ValidationError) as exc:
-                raise InvalidOutput("existing output is not a valid LenzContext YAML file") from exc
-            self.started = True
+        if (append or resume_base_dir is not None) and self.destination.exists() and self.destination.stat().st_size:
+            self.existing_names, self.started = _normalize_existing(self.destination, resume_base_dir)
 
     def write(self, image: ImageResult) -> None:
         # Render the complete record before opening the destination. Each close

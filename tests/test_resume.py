@@ -62,7 +62,7 @@ def test_resume_creates_output_and_keeps_new_duplicates(monkeypatch, tmp_path, m
 @pytest.mark.parametrize('contents', [
     'not YAML: [', 'version: 2\nimages: []\n', 'version: 1\nimages: null\n',
     'version: 1\nimages: []\nother: value\n', 'version: 1\nimages: []\n---\nversion: 1\n',
-    'version: 1\nimages: []\n# comment\n', 'version: 1\nimages:\n- file: {name: A.jpg}\n',
+    'version: 1\nimages:\n- file: {name: A.jpg}\n',
 ])
 def test_resume_invalid_output_untouched(monkeypatch, tmp_path, contents):
     monkeypatch.chdir(tmp_path)
@@ -103,11 +103,11 @@ def test_resume_multiline_unicode_and_large_record(monkeypatch, tmp_path, analys
     assert writer.existing_names == set()
 
 
-def test_resume_rejects_noncanonical_record(tmp_path, analysis):
+def test_resume_accepts_noncanonical_record(tmp_path, analysis):
     output = tmp_path / 'result.yaml'
     IncrementalYamlWriter(output).write(record('A.jpg', analysis))
     original = output.read_text().replace('name: A.jpg', 'name: "A.jpg"')
     output.write_text(original)
-    with pytest.raises(InvalidOutput):
-        read_existing_names(output, str(tmp_path))
-    assert output.read_text() == original
+    writer = IncrementalYamlWriter(output, resume_base_dir=str(tmp_path))
+    assert writer.existing_names == {str(tmp_path / "A.jpg")}
+    assert output.read_text() != original

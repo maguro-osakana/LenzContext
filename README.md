@@ -191,23 +191,28 @@ watch an existing output while the batch runs, use `tail -f lenzcontext.yaml`;
 `tail -F lenzcontext.yaml` also waits for the file to appear. When using `-o`
 or the default output, the first success replaces the existing file. With `-a`,
 the first success creates the file if needed or adds a record to an existing
-LenzContext YAML file. Append mode checks the file's format before any image is
-processed; manually edited or malformed files are rejected. Repeated file names
+LenzContext YAML file. Append and resume modes validate existing YAML one record at a time and write
+a normalized temporary file before processing images. After the entire document
+validates, the temporary file replaces the original. Indentation, quoting, key
+order and comments may differ from generated output; comments and formatting
+are discarded during normalization. Validation failures, interrupted normalization,
+and temporary-file write failures preserve the original and remove the temporary file. Repeated file names
 are appended as separate records.
 
 `--resume FILE` reads the existing generated YAML and skips inputs whose
 `file.name` is already recorded, then appends successful new analyses. A missing
 or empty file is created on the first success. If every input is already recorded,
-the command exits successfully without modifying the file or calling the LLM.
+the command exits successfully without calling the LLM; the existing file is still
+normalized at startup.
 Both recorded names and inputs are normalized to absolute paths relative to the
 current working directory (not the YAML file's directory). Thus `sample/A.jpg`,
 `./sample/A.jpg`, and an equivalent absolute path match; `..` and repeated path
 separators are normalized. Symbolic links are not resolved. Output names keep
 the original input spelling. The name set is fixed at startup: repeated new
 inputs are still analyzed and appended separately, just as with `-a`.
-Existing YAML is validated one record at a time, retaining only the name set;
-startup time scales with the size of the existing YAML. Malformed or manually
-edited files are rejected before analysis.
+Existing YAML is validated and normalized one record at a time, retaining only
+the name set; startup time scales with its size. Invalid content is rejected
+before analysis. Normalization requires temporary disk space for the full output.
 
 `-j N` / `--jobs N` controls simultaneous LLM analyses, including retries; it
 defaults to `1`. All job counts use the same worker-pool implementation, including
@@ -355,6 +360,20 @@ images:
 
 The example shows output with `--description-language Japanese`.
 
+To aggregate `images[].analysis.screenshot_probability` and print an ASCII histogram:
+
+```bash
+python scripts/screenshot_histogram.py result.yaml --bins 20 --width 50
+# Combine multiple output files:
+python scripts/screenshot_histogram.py result1.yaml result2.yaml
+```
+
+With no input argument, the script reads `lenzcontext.yaml`. Bins span 0–1;
+missing, nonnumeric, and out-of-range values are skipped and counted. The script
+also prints the count, minimum, maximum, mean, and median. `--width` sets the
+maximum bar length. Each bin includes its lower bound; only the final bin also
+includes its upper bound (1.0).
+
 OCR text is normalized after string type validation: consecutive whitespace
 (including LF/CRLF, tabs, full-width spaces, and nonbreaking spaces) becomes one
 ASCII space (`0x20`), and leading/trailing whitespace is removed. Other characters
@@ -399,8 +418,9 @@ coordinates and OCR text from the image; redact them before sharing.
   colliding with an input/DB.
 - Exit `130`: processing interrupted with Ctrl-C.
 
-When nothing succeeds, an existing output file is left unchanged and a new one
-is not created. Successful records preserve input order; failed inputs are
+When nothing succeeds, a new output file is not created. With `-a` or `--resume`,
+a valid existing output is still normalized at startup even when no new records
+are written. Successful records preserve input order; failed inputs are
 omitted. A write error stops the batch; records already written remain in the
 output file.
 
